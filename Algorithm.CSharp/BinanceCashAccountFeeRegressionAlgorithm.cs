@@ -21,8 +21,13 @@ namespace QuantConnect.Algorithm.CSharp
     /// <summary>
     /// Binance cash account regression algorithm, reproduces issue https://github.com/QuantConnect/Lean/issues/6123
     /// </summary>
-    public class BinanceCashAccountFeeRegressionAlgorithm : CryptoCashAccountFeeRegressionAlgorithm
+    public class BinanceCashAccountFeeRegressionAlgorithm : CryptoBaseCurrencyFeeRegressionAlgorithm
     {
+        /// <summary>
+        /// The target account type
+        /// </summary>
+        protected override AccountType AccountType { get; } = AccountType.Cash;
+
         public override void Initialize()
         {
             SetAccountCurrency("USDT");
@@ -34,18 +39,36 @@ namespace QuantConnect.Algorithm.CSharp
         }
 
         /// <summary>
+        /// Data Points count of all timeslices of algorithm
+        /// </summary>
+        public override long DataPoints => 50;
+
+        /// <summary>
+        /// Data Points count of the algorithm history
+        /// </summary>
+        public override int AlgorithmHistoryDataPoints => 5;
+
+        /// <summary>
+        /// Final status of the algorithm
+        /// </summary>
+        public AlgorithmStatus AlgorithmStatus => AlgorithmStatus.Completed;
+
+        /// <summary>
         /// This is used by the regression test system to indicate what the expected statistics are from running the algorithm
         /// </summary>
         public override Dictionary<string, string> ExpectedStatistics => new()
         {
-            {"Total Trades", "49"},
+            {"Total Orders", "49"},
             {"Average Win", "0%"},
             {"Average Loss", "0%"},
             {"Compounding Annual Return", "0%"},
             {"Drawdown", "0%"},
             {"Expectancy", "0"},
+            {"Start Equity", "100000.00"},
+            {"End Equity", "99986.57"},
             {"Net Profit", "0%"},
             {"Sharpe Ratio", "0"},
+            {"Sortino Ratio", "0"},
             {"Probabilistic Sharpe Ratio", "0%"},
             {"Loss Rate", "0%"},
             {"Win Rate", "0%"},
@@ -57,29 +80,12 @@ namespace QuantConnect.Algorithm.CSharp
             {"Information Ratio", "0"},
             {"Tracking Error", "0"},
             {"Treynor Ratio", "0"},
-            {"Total Fees", "$45.62"},
-            {"Estimated Strategy Capacity", "$220000.00"},
+            {"Total Fees", "₮45.62"},
+            {"Estimated Strategy Capacity", "₮220000.00"},
             {"Lowest Capacity Asset", "BTCUSDT 18N"},
-            {"Fitness Score", "0.208"},
-            {"Kelly Criterion Estimate", "0"},
-            {"Kelly Criterion Probability Value", "0"},
-            {"Sortino Ratio", "79228162514264337593543950335"},
-            {"Return Over Maximum Drawdown", "26.189"},
-            {"Portfolio Turnover", "0.208"},
-            {"Total Insights Generated", "0"},
-            {"Total Insights Closed", "0"},
-            {"Total Insights Analysis Completed", "0"},
-            {"Long Insight Count", "0"},
-            {"Short Insight Count", "0"},
-            {"Long/Short Ratio", "100%"},
-            {"Estimated Monthly Alpha Value", "USDT0"},
-            {"Total Accumulated Estimated Alpha Value", "USDT0"},
-            {"Mean Population Estimated Insight Value", "USDT0"},
-            {"Mean Population Direction", "0%"},
-            {"Mean Population Magnitude", "0%"},
-            {"Rolling Averaged Population Direction", "0%"},
-            {"Rolling Averaged Population Magnitude", "0%"},
-            {"OrderListHash", "7417649395922ff3791471b4f3b5c021"}
+            {"Portfolio Turnover", "22.80%"},
+            {"Drawdown Recovery", "0"},
+            {"OrderListHash", "80711e4c1e3c0da20152da8fafc3fd66"}
         };
     }
 }

@@ -14,7 +14,11 @@
 */
 
 using System;
+using System.IO;
 using System.Linq;
+using QuantConnect.Logging;
+using QuantConnect.Data.Market;
+using System.Collections.Generic;
 
 namespace QuantConnect.Data.UniverseSelection
 {
@@ -23,6 +27,23 @@ namespace QuantConnect.Data.UniverseSelection
     /// </summary>
     public static class UniverseExtensions
     {
+        /// <summary>
+        /// Gets the given universe as the requested type, checking the universe it decorates, if any
+        /// </summary>
+        /// <typeparam name="T">The type to look for</typeparam>
+        /// <param name="universe">The universe to check</param>
+        /// <param name="result">The universe as the requested type, if any</param>
+        /// <returns>True if the universe, or one it decorates, is of the requested type</returns>
+        public static bool TryGetUniverse<T>(this Universe universe, out T result) where T : class
+        {
+            result = universe as T;
+            if (result == null && universe is UniverseDecorator decorator)
+            {
+                return decorator.TryGetUnderlying(out result);
+            }
+            return result != null;
+        }
+
         /// <summary>
         /// Creates a new universe that logically is the result of wiring the two universes together such that
         /// the first will produce subscriptions for the second and the second will only select on data that has
@@ -83,6 +104,8 @@ namespace QuantConnect.Data.UniverseSelection
         /// <returns>A symbol for user defined universe of the specified security type and market</returns>
         public static Symbol CreateSymbol(SecurityType securityType, string market, string ticker)
         {
+            // TODO looks like we can just replace this for Symbol.Create?
+
             SecurityIdentifier sid;
             switch (securityType)
             {
@@ -129,12 +152,93 @@ namespace QuantConnect.Data.UniverseSelection
                     sid = SecurityIdentifier.GenerateCrypto(ticker, market);
                     break;
 
+                case SecurityType.CryptoFuture:
+                    sid = SecurityIdentifier.GenerateCryptoFuture(SecurityIdentifier.DefaultDate, ticker, market);
+                    break;
+
                 case SecurityType.Commodity:
                 default:
                     throw new NotImplementedException($"The specified security type is not implemented yet: {securityType}");
             }
 
             return new Symbol(sid, ticker);
+        }
+
+        /// <summary>
+        /// Processes the universe download based on parameters.
+        /// </summary>
+        /// <param name="dataDownloader">The data downloader instance.</param>
+        /// <param name="universeDownloadParameters">The parameters for universe downloading.</param>
+        public static void RunUniverseDownloader(IDataDownloader dataDownloader, DataUniverseDownloaderGetParameters universeDownloadParameters)
+        {
+            var universeDataBySymbol = new Dictionary<Symbol, DerivativeUniverseData>();
+            foreach (var (processingDate, universeDownloaderParameters) in universeDownloadParameters.CreateDataDownloaderGetParameters())
+            {
+                universeDataBySymbol.Clear();
+
+                foreach (var downloaderParameters in universeDownloaderParameters)
+                {
+                    Log.Debug($"{nameof(UniverseExtensions)}.{nameof(RunUniverseDownloader)}:Generating universe for {downloaderParameters.Symbol} on {processingDate:yyyy/MM/dd}");
+
+                    var historyData = dataDownloader.Get(downloaderParameters);
+
+                    if (historyData == null)
+                    {
+                        Log.Debug($"{nameof(UniverseExtensions)}.{nameof(RunUniverseDownloader)}: No data available for the following parameters: {universeDownloadParameters}");
+                        continue;
+                    }
+
+                    foreach (var baseData in historyData)
+                    {
+                        switch (baseData)
+                        {
+                            case TradeBar tradeBar:
+                                if (!universeDataBySymbol.TryAdd(tradeBar.Symbol, new(tradeBar)))
+                                {
+                                    universeDataBySymbol[tradeBar.Symbol].UpdateByTradeBar(tradeBar);
+                                }
+                                break;
+                            case OpenInterest openInterest:
+                                if (!universeDataBySymbol.TryAdd(openInterest.Symbol, new(openInterest)))
+                                {
+                                    universeDataBySymbol[openInterest.Symbol].UpdateByOpenInterest(openInterest);
+                                }
+                                break;
+                            case QuoteBar quoteBar:
+                                if (!universeDataBySymbol.TryAdd(quoteBar.Symbol, new(quoteBar)))
+                                {
+                                    universeDataBySymbol[quoteBar.Symbol].UpdateByQuoteBar(quoteBar);
+                                }
+                                break;
+                            default:
+                                throw new InvalidOperationException($"{nameof(UniverseExtensions)}.{nameof(RunUniverseDownloader)}: Unexpected data type encountered.");
+                        }
+                    }
+                }
+
+                if (universeDataBySymbol.Count == 0)
+                {
+                    continue;
+                }
+
+                using var writer = new StreamWriter(universeDownloadParameters.GetUniverseFileName(processingDate));
+
+                var securityType = universeDownloadParameters.Symbol.SecurityType;
+                writer.WriteLine($"#{(securityType == SecurityType.Future ? FutureUniverse.CsvHeader : OptionUniverse.CsvHeader(securityType))}");
+
+                // Write option data, sorted by contract type (Call/Put), strike price, expiration date, and then by full ID
+                foreach (var universeData in universeDataBySymbol
+                    .OrderBy(x => x.Key.Underlying != null)
+                    .ThenBy(d => d.Key.SecurityType.IsOption() ? d.Key.ID.OptionRight : 0)
+                    .ThenBy(d => d.Key.SecurityType.IsOption() ? d.Key.ID.StrikePrice : 0)
+                    .ThenBy(d => d.Key.ID.Date)
+                    .ThenBy(d => d.Key.ID))
+                {
+                    writer.WriteLine(universeData.Value.ToCsv());
+                }
+
+                Log.Trace($"{nameof(UniverseExtensions)}.{nameof(RunUniverseDownloader)}:Generated for {universeDownloadParameters.Symbol} on {processingDate:yyyy/MM/dd} with {universeDataBySymbol.Count} entries");
+            }
         }
     }
 }

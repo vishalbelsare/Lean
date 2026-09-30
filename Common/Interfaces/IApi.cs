@@ -18,6 +18,8 @@ using System;
 using System.Collections.Generic;
 using System.ComponentModel.Composition;
 using QuantConnect.Api;
+using QuantConnect.Orders;
+using QuantConnect.Notifications;
 using QuantConnect.Optimizer.Objectives;
 using QuantConnect.Optimizer.Parameters;
 using QuantConnect.Statistics;
@@ -52,13 +54,22 @@ namespace QuantConnect.Interfaces
         ProjectResponse ReadProject(int projectId);
 
         /// <summary>
+        /// Update a project's name or description
+        /// </summary>
+        /// <param name="projectId">Project id to update</param>
+        /// <param name="name">The new name for the project</param>
+        /// <param name="description">The new description for the project</param>
+        /// <returns><see cref="RestResponse"/> indicating success</returns>
+        RestResponse UpdateProject(int projectId, string name = null, string description = null);
+
+        /// <summary>
         /// Add a file to a project
         /// </summary>
         /// <param name="projectId">The project to which the file should be added</param>
         /// <param name="name">The name of the new file</param>
         /// <param name="content">The content of the new file</param>
         /// <returns><see cref="ProjectFilesResponse"/> that includes information about the newly created file</returns>
-        ProjectFilesResponse AddProjectFile(int projectId, string name, string content);
+        RestResponse AddProjectFile(int projectId, string name, string content);
 
         /// <summary>
         /// Update the name of a file
@@ -94,6 +105,22 @@ namespace QuantConnect.Interfaces
         ProjectFilesResponse ReadProjectFiles(int projectId);
 
         /// <summary>
+        /// Read all nodes in a project.
+        /// </summary>
+        /// <param name="projectId">Project id to which the nodes refer</param>
+        /// <returns><see cref="ProjectNodesResponse"/> that includes the information about all nodes in the project</returns>
+        ProjectNodesResponse ReadProjectNodes(int projectId);
+
+        /// <summary>
+        /// Update the active state of some nodes to true.
+        /// If you don't provide any nodes, all the nodes become inactive and AutoSelectNode is true.
+        /// </summary>
+        /// <param name="projectId">Project id to which the nodes refer</param>
+        /// <param name="nodes">List of node ids to update</param>
+        /// <returns><see cref="ProjectNodesResponse"/> that includes the information about all nodes in the project</returns>
+        ProjectNodesResponse UpdateProjectNodes(int projectId, string[] nodes);
+
+        /// <summary>
         /// Delete a file in a project
         /// </summary>
         /// <param name="projectId">Project id to which the file belongs</param>
@@ -111,8 +138,10 @@ namespace QuantConnect.Interfaces
         /// <summary>
         /// Read back a list of all projects on the account for a user.
         /// </summary>
+        /// <param name="start">Starting (inclusive, zero-based) index of the projects to be fetched</param>
+        /// <param name="end">Last (exclusive) index of the projects to be fetched</param>
         /// <returns>Container for list of projects</returns>
-        ProjectResponse ListProjects();
+        ProjectResponse ListProjects(int start = 0, int end = 0);
 
         /// <summary>
         /// Create a new compile job request for this project id.
@@ -132,11 +161,12 @@ namespace QuantConnect.Interfaces
         /// <summary>
         /// Create a new backtest from a specified projectId and compileId
         /// </summary>
-        /// <param name="projectId"></param>
-        /// <param name="compileId"></param>
-        /// <param name="backtestName"></param>
-        /// <returns></returns>
-        Backtest CreateBacktest(int projectId, string compileId, string backtestName);
+        /// <param name="projectId">Id for the project to backtest</param>
+        /// <param name="compileId">Compile id for the project</param>
+        /// <param name="backtestName">Name for the new backtest</param>
+        /// <param name="parameters">Parameters to use for the backtest</param>
+        /// <returns>Backtest result object</returns>
+        Backtest CreateBacktest(int projectId, string compileId, string backtestName, Dictionary<string, string> parameters = null);
 
         /// <summary>
         /// Read out the full result of a specific backtest
@@ -152,10 +182,19 @@ namespace QuantConnect.Interfaces
         /// </summary>
         /// <param name="projectId">Project id to update</param>
         /// <param name="backtestId">Backtest id to update</param>
-        /// <param name="backtestName">New backtest name to set</param>
-        /// <param name="backtestNote">Note attached to the backtest</param>
+        /// <param name="name">New backtest name to set</param>
+        /// <param name="note">Note attached to the backtest</param>
         /// <returns>Rest response on success</returns>
-        RestResponse UpdateBacktest(int projectId, string backtestId, string backtestName = "", string backtestNote = "");
+        RestResponse UpdateBacktest(int projectId, string backtestId, string name = null, string note = "");
+
+        /// <summary>
+        /// Updates the tags collection for a backtest
+        /// </summary>
+        /// <param name="projectId">Project for the backtest we want to update</param>
+        /// <param name="backtestId">Backtest id we want to update</param>
+        /// <param name="tags">The new backtest tags</param>
+        /// <returns><see cref="RestResponse"/></returns>
+        RestResponse UpdateBacktestTags(int projectId, string backtestId, IReadOnlyCollection<string> tags);
 
         /// <summary>
         /// Delete a backtest from the specified project and backtestId.
@@ -166,12 +205,46 @@ namespace QuantConnect.Interfaces
         RestResponse DeleteBacktest(int projectId, string backtestId);
 
         /// <summary>
-        /// Get a list of backtests for a specific project id
+        /// Get a list of backtest summaries for a specific project id
         /// </summary>
         /// <param name="projectId">Project id to search</param>
+        /// <param name="includeStatistics">True for include statistics in the response, false otherwise</param>
         /// <returns>BacktestList container for list of backtests</returns>
-        BacktestList ListBacktests(int projectId);
+        BacktestSummaryList ListBacktests(int projectId, bool includeStatistics = true);
 
+        /// <summary>
+        /// Read out the insights of a backtest
+        /// </summary>
+        /// <param name="projectId">Id of the project from which to read the backtest</param>
+        /// <param name="backtestId">Backtest id from which we want to get the insights</param>
+        /// <param name="start">Starting index of the insights to be fetched</param>
+        /// <param name="end">Last index of the insights to be fetched. Note that end - start must be less than 100</param>
+        /// <returns><see cref="InsightResponse"/></returns>
+        /// <exception cref="ArgumentException"></exception>
+        public InsightResponse ReadBacktestInsights(int projectId, string backtestId, int start = 0, int end = 0);
+
+        /// <summary>
+        /// Returns the orders of the specified backtest and project id.
+        /// </summary>
+        /// <param name="projectId">Id of the project from which to read the orders</param>
+        /// <param name="backtestId">Id of the backtest from which to read the orders</param>
+        /// <param name="start">Starting index of the orders to be fetched</param>
+        /// <param name="end">Last index of the orders to be fetched</param>
+        /// <returns>The <see cref="OrdersResponseWrapper"/> with the requested orders and the total order count</returns>
+        OrdersResponseWrapper ReadBacktestOrders(int projectId, string backtestId, int start = 0, int end = 0);
+
+        /// <summary>
+        /// Gets the logs of a specific backtest
+        /// </summary>
+        /// <param name="projectId">Id of the project from which to read the backtest</param>
+        /// <param name="backtestId">Id of the backtest from which to read the logs</param>
+        /// <param name="start">Start line (inclusive) of logs to read</param>
+        /// <param name="end">End line (exclusive) of logs to read</param>
+        /// <param name="query">Keyword to filter the log lines</param>
+        /// <returns><see cref="BacktestLog"/> with the requested log lines and the total log line count</returns>
+        BacktestLog ReadBacktestLog(int projectId, string backtestId, int start = 0, int end = 0, string query = null);
+
+#pragma warning disable CS1574
         /// <summary>
         /// Estimate optimization with the specified parameters via QuantConnect.com API
         /// </summary>
@@ -185,6 +258,7 @@ namespace QuantConnect.Interfaces
         /// <param name="parameters">Optimization parameters</param>
         /// <param name="constraints">Optimization constraints</param>
         /// <returns>Estimate object from the API.</returns>
+#pragma warning restore CS1574
         public Estimate EstimateOptimization(
             int projectId,
             string name,
@@ -196,6 +270,7 @@ namespace QuantConnect.Interfaces
             HashSet<OptimizationParameter> parameters,
             IReadOnlyList<Constraint> constraints);
 
+#pragma warning disable CS1574
         /// <summary>
         /// Create an optimization with the specified parameters via QuantConnect.com API
         /// </summary>
@@ -212,7 +287,8 @@ namespace QuantConnect.Interfaces
         /// <param name="nodeType">Optimization node type</param>
         /// <param name="parallelNodes">Number of parallel nodes for optimization</param>
         /// <returns>BaseOptimization object from the API.</returns>
-        public BaseOptimization CreateOptimization(
+#pragma warning restore CS1574
+        public OptimizationSummary CreateOptimization(
             int projectId,
             string name,
             string target,
@@ -231,18 +307,18 @@ namespace QuantConnect.Interfaces
         /// </summary>
         /// <param name="projectId">Project id we'd like to get a list of optimizations for</param>
         /// <returns>A list of BaseOptimization objects, <see cref="BaseOptimization"/></returns>
-        public List<BaseOptimization> ListOptimizations(int projectId);
+        public List<OptimizationSummary> ListOptimizations(int projectId);
 
         /// <summary>
         /// Read an optimization
-        /// </summary>        
+        /// </summary>
         /// <param name="optimizationId">Optimization id for the optimization we want to read</param>
         /// <returns><see cref="Optimization"/></returns>
         public Optimization ReadOptimization(string optimizationId);
 
         /// <summary>
         /// Abort an optimization
-        /// </summary>        
+        /// </summary>
         /// <param name="optimizationId">Optimization id for the optimization we want to abort</param>
         /// <returns><see cref="RestResponse"/></returns>
         public RestResponse AbortOptimization(string optimizationId);
@@ -257,7 +333,7 @@ namespace QuantConnect.Interfaces
 
         /// <summary>
         /// Delete an optimization
-        /// </summary>        
+        /// </summary>
         /// <param name="optimizationId">Optimization id for the optimization we want to delete</param>
         /// <returns><see cref="RestResponse"/></returns>
         public RestResponse DeleteOptimization(string optimizationId);
@@ -267,10 +343,60 @@ namespace QuantConnect.Interfaces
         /// </summary>
         /// <param name="projectId">Project Id of the live running algorithm</param>
         /// <param name="algorithmId">Algorithm Id of the live running algorithm</param>
-        /// <param name="startTime">No logs will be returned before this time. Should be in UTC</param>
-        /// <param name="endTime">No logs will be returned after this time. Should be in UTC</param>
-        /// <returns>List of strings that represent the logs of the algorithm</returns>
-        LiveLog ReadLiveLogs(int projectId, string algorithmId, DateTime? startTime = null, DateTime? endTime = null);
+        /// <param name="startLine">Start line (inclusive) of logs to read</param>
+        /// <param name="endLine">End line (exclusive) of logs to read</param>
+        /// <param name="query">Keyword to filter the log lines</param>
+        /// <param name="deploymentLogs">Whether only the logs of the given <paramref name="algorithmId"/> deployment should be returned</param>
+        /// <returns><see cref="LiveLog"/> with the requested log lines</returns>
+        LiveLog ReadLiveLogs(int projectId, string algorithmId, int startLine = 0, int endLine = 0, string query = null, bool deploymentLogs = false);
+
+        /// <summary>
+        /// Returns a chart object from a live algorithm
+        /// </summary>
+        /// <param name="projectId">Project ID of the request</param>
+        /// <param name="name">The requested chart name</param>
+        /// <param name="start">The Utc start seconds timestamp of the request</param>
+        /// <param name="end">The Utc end seconds timestamp of the request</param>
+        /// <param name="count">The number of data points to request</param>
+        /// <returns></returns>
+        public ReadChartResponse ReadLiveChart(int projectId, string name, int start, int end, uint count);
+
+        /// <summary>
+        /// Read out the portfolio state of a live algorithm
+        /// </summary>
+        /// <param name="projectId">Id of the project from which to read the live algorithm</param>
+        /// <returns><see cref="PortfolioResponse"/></returns>
+        public PortfolioResponse ReadLivePortfolio(int projectId);
+
+        /// <summary>
+        /// Read out the insights of a live algorithm
+        /// </summary>
+        /// <param name="projectId">Id of the project from which to read the live algorithm</param>
+        /// <param name="algorithmId">Deploy id (algorithm id) of the live running algorithm, null for the latest deployment</param>
+        /// <param name="start">Starting index of the insights to be fetched</param>
+        /// <param name="end">Last index of the insights to be fetched</param>
+        /// <returns><see cref="InsightResponse"/></returns>
+        public InsightResponse ReadLiveInsights(int projectId, string algorithmId, int start = 0, int end = 0);
+
+        /// <summary>
+        /// Read out the insights of the latest deployment of a live algorithm
+        /// </summary>
+        /// <param name="projectId">Id of the project from which to read the live algorithm</param>
+        /// <param name="start">Starting index of the insights to be fetched</param>
+        /// <param name="end">Last index of the insights to be fetched</param>
+        /// <returns><see cref="InsightResponse"/></returns>
+        [Obsolete("Use the overload taking the algorithm id: ReadLiveInsights(projectId, algorithmId, start, end)")]
+        public InsightResponse ReadLiveInsights(int projectId, int start = 0, int end = 0);
+
+        /// <summary>
+        /// Returns the orders of the specified project id live algorithm.
+        /// </summary>
+        /// <param name="projectId">Id of the project from which to read the live orders</param>
+        /// <param name="algorithmId">Deploy id (algorithm id) of the live running algorithm, null for the latest deployment</param>
+        /// <param name="start">Starting index of the orders to be fetched</param>
+        /// <param name="end">Last index of the orders to be fetched</param>
+        /// <returns>The <see cref="OrdersResponseWrapper"/> with the requested orders and the total order count</returns>
+        OrdersResponseWrapper ReadLiveOrders(int projectId, string algorithmId = null, int start = 0, int end = 0);
 
         /// <summary>
         /// Gets the link to the downloadable data.
@@ -300,6 +426,18 @@ namespace QuantConnect.Interfaces
         public BacktestReport ReadBacktestReport(int projectId, string backtestId);
 
         /// <summary>
+        /// Returns a requested chart object from a backtest
+        /// </summary>
+        /// <param name="projectId">Project ID of the request</param>
+        /// <param name="name">The requested chart name</param>
+        /// <param name="start">The Utc start seconds timestamp of the request</param>
+        /// <param name="end">The Utc end seconds timestamp of the request</param>
+        /// <param name="count">The number of data points to request</param>
+        /// <param name="backtestId">Associated Backtest ID for this chart request</param>
+        /// <returns></returns>
+        public ReadChartResponse ReadBacktestChart(int projectId, string name, int start, int end, uint count, string backtestId);
+
+        /// <summary>
         /// Method to download and save the data purchased through QuantConnect
         /// </summary>
         /// <param name="filePath">File path representing the data requested</param>
@@ -307,60 +445,10 @@ namespace QuantConnect.Interfaces
         bool DownloadData(string filePath, string organizationId);
 
         /// <summary>
-        /// Create a new node in the organization, node configuration is defined by the
-        /// <see cref="SKU"/>
-        /// </summary>
-        /// <param name="name">The name of the new node</param>
-        /// <param name="organizationId">ID of the organization</param>
-        /// <param name="sku"><see cref="SKU"/> Object representing configuration</param>
-        /// <returns>Returns <see cref="CreatedNode"/> which contains API response and
-        /// <see cref="Node"/></returns>
-        public CreatedNode CreateNode(string name, string organizationId, SKU sku);
-
-        /// <summary>
-        /// Reads the nodes associated with the organization, creating a
-        /// <see cref="NodeList"/> for the response
-        /// </summary>
-        /// <param name="organizationId">ID of the organization</param>
-        /// <returns><see cref="NodeList"/> containing Backtest, Research, and Live Nodes</returns>
-        public NodeList ReadNodes(string organizationId);
-
-        /// <summary>
-        /// Update an organizations node with a new name
-        /// </summary>
-        /// <param name="nodeId">The node ID of the node you want to update</param>
-        /// <param name="newName">The new name for that node</param>
-        /// <param name="organizationId">ID of the organization</param>
-        /// <returns><see cref="RestResponse"/> containing success response and errors</returns>
-        public RestResponse UpdateNode(string nodeId, string newName, string organizationId);
-
-        /// <summary>
-        /// Delete a node from an organization, requires node ID.
-        /// </summary>
-        /// <param name="nodeId">The node ID of the node you want to delete</param>
-        /// <param name="organizationId">ID of the organization</param>
-        /// <returns><see cref="RestResponse"/> containing success response and errors</returns>
-        public RestResponse DeleteNode(string nodeId, string organizationId);
-
-        /// <summary>
-        /// Stop a running node in a organization
-        /// </summary>
-        /// <param name="nodeId">The node ID of the node you want to stop</param>
-        /// <param name="organizationId">ID of the organization</param>
-        /// <returns><see cref="RestResponse"/> containing success response and errors</returns>
-        public RestResponse StopNode(string nodeId, string organizationId);
-
-        /// <summary>
         /// Will read the organization account status
         /// </summary>
         /// <param name="organizationId">The target organization id, if null will return default organization</param>
         public Account ReadAccount(string organizationId = null);
-
-        /// <summary>
-        /// Get a list of organizations tied to this account
-        /// </summary>
-        /// <returns></returns>
-        public List<Organization> ListOrganizations();
 
         /// <summary>
         /// Fetch organization data from web API
@@ -374,28 +462,27 @@ namespace QuantConnect.Interfaces
         /// </summary>
         /// <param name="projectId">Id of the project on QuantConnect</param>
         /// <param name="compileId">Id of the compilation on QuantConnect</param>
-        /// <param name="serverType">Type of server instance that will run the algorithm</param>
-        /// <param name="baseLiveAlgorithmSettings">Brokerage specific <see cref="BaseLiveAlgorithmSettings">BaseLiveAlgorithmSettings</see>.</param>
+        /// <param name="nodeId">Id of the node that will run the algorithm</param>
+        /// <param name="brokerageSettings">Dictionary with Brokerage specific settings</param>
         /// <param name="versionId">The version identifier</param>
-        /// <returns>Information regarding the new algorithm <see cref="LiveAlgorithm"/></returns>
-        LiveAlgorithm CreateLiveAlgorithm(int projectId, string compileId, string serverType, BaseLiveAlgorithmSettings baseLiveAlgorithmSettings, string versionId = "-1");
+        /// <param name="dataProviders">Dictionary with data providers and their corresponding credentials</param>
+        /// <returns>Information regarding the new algorithm <see cref="CreateLiveAlgorithmResponse"/></returns>
+        CreateLiveAlgorithmResponse CreateLiveAlgorithm(int projectId, string compileId, string nodeId, Dictionary<string, object> brokerageSettings, string versionId = "-1", Dictionary<string, object> dataProviders = null);
 
         /// <summary>
         /// Get a list of live running algorithms for a logged in user.
         /// </summary>
         /// <param name="status">Filter the statuses of the algorithms returned from the api</param>
-        /// <param name="startTime">Earliest launched time of the algorithms returned by the Api</param>
-        /// <param name="endTime">Latest launched time of the algorithms returned by the Api</param>
+        /// <param name="projectId">Id of the project to include in the response</param>
         /// <returns>List of live algorithm instances</returns>
-        LiveList ListLiveAlgorithms(AlgorithmStatus? status = null, DateTime? startTime = null, DateTime? endTime = null);
+        LiveList ListLiveAlgorithms(AlgorithmStatus? status = null, int? projectId = null);
 
         /// <summary>
-        /// Read out a live algorithm in the project id specified.
+        /// Read out the latest deployment of the live algorithm of the project id specified.
         /// </summary>
         /// <param name="projectId">Project id to read</param>
-        /// <param name="deployId">Specific instance id to read</param>
         /// <returns>Live object with the results</returns>
-        LiveAlgorithmResults ReadLiveAlgorithm(int projectId, string deployId);
+        LiveAlgorithmResults ReadLiveAlgorithm(int projectId);
 
         /// <summary>
         /// Liquidate a live algorithm from the specified project.
@@ -411,13 +498,13 @@ namespace QuantConnect.Interfaces
         /// <returns></returns>
         RestResponse StopLiveAlgorithm(int projectId);
 
-        //Status StatusRead(int projectId, string algorithmId);
-        //RestResponse StatusUpdate(int projectId, string algorithmId, AlgorithmStatus status, string message = "");
-        //LogControl LogAllowanceRead();
-        //void LogAllowanceUpdate(string backtestId, string url, int length);
-        //void StatisticsUpdate(int projectId, string algorithmId, decimal unrealized, decimal fees, decimal netProfit, decimal holdings, decimal equity, decimal netReturn, decimal volume, int trades, double sharpe);
-        //void NotifyOwner(int projectId, string algorithmId, string subject, string body);
-        //IEnumerable<MarketHoursSegment> MarketHours(int projectId, DateTime time, Symbol symbol);
+        /// <summary>
+        /// Sends a notification
+        /// </summary>
+        /// <param name="notification">The notification to send</param>
+        /// <param name="projectId">The project id</param>
+        /// <returns><see cref="RestResponse"/> containing success response and errors</returns>
+        RestResponse SendNotification(Notification notification, int projectId);
 
         /// <summary>
         /// Get the algorithm current status, active or cancelled from the user
@@ -450,12 +537,14 @@ namespace QuantConnect.Interfaces
         void SendStatistics(string algorithmId, decimal unrealized, decimal fees, decimal netProfit, decimal holdings, decimal equity, decimal netReturn, decimal volume, int trades, double sharpe);
 
         /// <summary>
-        /// Send an email to the user associated with the specified algorithm id
+        /// Local implementation for downloading data to algorithms
         /// </summary>
-        /// <param name="algorithmId">The algorithm id</param>
-        /// <param name="subject">The email subject</param>
-        /// <param name="body">The email message body</param>
-        void SendUserEmail(string algorithmId, string subject, string body);
+        /// <param name="address">URL to download</param>
+        /// <param name="headers">KVP headers</param>
+        /// <param name="userName">Username for basic authentication</param>
+        /// <param name="password">Password for basic authentication</param>
+        /// <returns></returns>
+        string Download(string address, IEnumerable<KeyValuePair<string, string>> headers, string userName, string password);
 
         /// <summary>
         /// Local implementation for downloading data to algorithms
@@ -465,6 +554,71 @@ namespace QuantConnect.Interfaces
         /// <param name="userName">Username for basic authentication</param>
         /// <param name="password">Password for basic authentication</param>
         /// <returns></returns>
-        string Download(string address, IEnumerable<KeyValuePair<string, string>> headers, string userName, string password);
+        byte[] DownloadBytes(string address, IEnumerable<KeyValuePair<string, string>> headers, string userName, string password);
+
+        /// <summary>
+        /// Download the object store associated with the given organization ID and key
+        /// </summary>
+        /// <param name="organizationId">Organization ID we would like to get the Object Store from</param>
+        /// <param name="keys">Keys for the Object Store files</param>
+        /// <param name="destinationFolder">Folder in which the object will be stored</param>
+        /// <returns>True if the object was retrieved correctly, false otherwise</returns>
+        public bool GetObjectStore(string organizationId, List<string> keys, string destinationFolder = null);
+
+        /// <summary>
+        /// Get Object Store properties given the organization ID and the Object Store key
+        /// </summary>
+        /// <param name="organizationId">Organization ID we would like to get the Object Store from</param>
+        /// <param name="key">Key for the Object Store file</param>
+        /// <returns><see cref="PropertiesObjectStoreResponse"/></returns>
+        /// <remarks>It does not work when the object store is a directory</remarks>
+        public PropertiesObjectStoreResponse GetObjectStoreProperties(string organizationId, string key);
+
+        /// <summary>
+        /// Upload files to the Object Store
+        /// </summary>
+        /// <param name="organizationId">Organization ID we would like to upload the file to</param>
+        /// <param name="key">Key to the Object Store file</param>
+        /// <param name="objectData">File to be uploaded</param>
+        /// <returns><see cref="RestResponse"/></returns>
+        public RestResponse SetObjectStore(string organizationId, string key, byte[] objectData);
+
+        /// <summary>
+        /// Request to delete Object Store metadata of a specific organization and key
+        /// </summary>
+        /// <param name="organizationId">Organization ID we would like to delete the Object Store file from</param>
+        /// <param name="key">Key to the Object Store file</param>
+        /// <returns><see cref="RestResponse"/></returns>
+        public RestResponse DeleteObjectStore(string organizationId, string key);
+
+        /// <summary>
+        /// Request to list Object Store files of a specific organization and path
+        /// </summary>
+        /// <param name="organizationId">Organization ID we would like to list the Object Store files from</param>
+        /// <param name="path">Path to the Object Store files</param>
+        /// <returns><see cref="ListObjectStoreResponse"/></returns>
+        ListObjectStoreResponse ListObjectStore(string organizationId, string path);
+
+        /// <summary>
+        /// Gets a list of LEAN versions with their corresponding basic descriptions
+        /// </summary>
+        public VersionsResponse ReadLeanVersions();
+
+        /// <summary>
+        /// Create a live command
+        /// </summary>
+        /// <param name="projectId">Project for the live instance we want to run the command against</param>
+        /// <param name="command">The command to run</param>
+        /// <returns><see cref="RestResponse"/></returns>
+        RestResponse CreateLiveCommand(int projectId, object command);
+
+        /// <summary>
+        /// Broadcast a live command
+        /// </summary>
+        /// <param name="organizationId">Organization ID of the projects we would like to broadcast the command to</param>
+        /// <param name="excludeProjectId">Project for the live instance we want to exclude from the broadcast list</param>
+        /// <param name="command">The command to run</param>
+        /// <returns><see cref="RestResponse"/></returns>
+        public RestResponse BroadcastLiveCommand(string organizationId, int? excludeProjectId, object command);
     }
 }

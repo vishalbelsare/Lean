@@ -1,4 +1,4 @@
-﻿/*
+/*
  * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
  * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
  *
@@ -22,10 +22,13 @@ namespace QuantConnect.Optimizer.Parameters
 {
     /// <summary>
     /// Override <see cref="OptimizationParameter"/> deserialization method.
-    /// Can handle <see cref="OptimizationArrayParameter"/> and <see cref="OptimizationStepParameter"/> instances
+    /// Can handle <see cref="OptimizationStepParameter"/> instances
     /// </summary>
     public class OptimizationParameterJsonConverter : JsonConverter
     {
+        /// <summary>
+        /// Writes a JSON object from a OptimizationParameter object
+        /// </summary>        
         public override void WriteJson(JsonWriter writer, object value, JsonSerializer serializer)
         {
             JObject jo = new JObject();
@@ -46,6 +49,9 @@ namespace QuantConnect.Optimizer.Parameters
             jo.WriteTo(writer);
         }
 
+        /// <summary>
+        /// Creates a Optimization Parameter object from a JSON object
+        /// </summary>
         public override object ReadJson(
             JsonReader reader,
             Type objectType,
@@ -54,25 +60,21 @@ namespace QuantConnect.Optimizer.Parameters
             )
         {
             JObject token = JObject.Load(reader);
-            var parameterName = token.GetValue("name", StringComparison.OrdinalIgnoreCase)?.Value<string>();
+            var parameterName = (token.GetValue("name", StringComparison.OrdinalIgnoreCase) ?? token.GetValue("key", StringComparison.OrdinalIgnoreCase))?.Value<string>();
             if (string.IsNullOrEmpty(parameterName))
             {
-                throw new ArgumentException("Optimization parameter name is not specified.");
+                throw new ArgumentException(Messages.OptimizationParameterJsonConverter.OptimizationParameterNotSpecified);
             }
 
             JToken value;
             JToken minToken;
             JToken maxToken;
             OptimizationParameter optimizationParameter = null;
-            if (token.TryGetValue("value", StringComparison.OrdinalIgnoreCase, out value))
-            {
-                optimizationParameter = new StaticOptimizationParameter(parameterName, value.Value<string>());
-            }
-            else if (token.TryGetValue("min", StringComparison.OrdinalIgnoreCase, out minToken) &&
+            if (token.TryGetValue("min", StringComparison.OrdinalIgnoreCase, out minToken) &&
                 token.TryGetValue("max", StringComparison.OrdinalIgnoreCase, out maxToken))
             {
                 var stepToken = token.GetValue("step", StringComparison.OrdinalIgnoreCase)?.Value<decimal>();
-                var minStepToken = token.GetValue("min-step", StringComparison.OrdinalIgnoreCase)?.Value<decimal>();
+                var minStepToken = token.GetValue("minStep", StringComparison.OrdinalIgnoreCase)?.Value<decimal>() ?? token.GetValue("min-step", StringComparison.OrdinalIgnoreCase)?.Value<decimal>();
                 if (stepToken.HasValue)
                 {
                     if (minStepToken.HasValue)
@@ -98,16 +100,22 @@ namespace QuantConnect.Optimizer.Parameters
                         maxToken.Value<decimal>());
                 }
             }
+            else if(token.TryGetValue("value", StringComparison.OrdinalIgnoreCase, out value))
+            {
+                optimizationParameter = new StaticOptimizationParameter(parameterName, value.Value<string>());
+            }
 
             if (optimizationParameter == null)
             {
-                throw new ArgumentException(
-                    "Optimization parameter are not currently supported.");
+                throw new ArgumentException(Messages.OptimizationParameterJsonConverter.OptimizationParameterNotSupported);
             }
 
             return optimizationParameter;
         }
 
+        /// <summary>
+        /// Determines if an OptimizationParameter is assignable from the given object type
+        /// </summary>
         public override bool CanConvert(Type objectType) => typeof(OptimizationParameter).IsAssignableFrom(objectType);
     }
 }

@@ -1,4 +1,4 @@
-﻿/*
+/*
  * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
  * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
  *
@@ -21,6 +21,7 @@ using QuantConnect.Configuration;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
+using QuantConnect.Optimizer.Analysis;
 using QuantConnect.Optimizer.Objectives;
 using QuantConnect.Optimizer.Parameters;
 using QuantConnect.Optimizer.Strategies;
@@ -41,6 +42,9 @@ namespace QuantConnect.Optimizer
         private int _completedBacktest;
         private volatile bool _disposed;
 
+        // Per-backtest metrics extracted in NewResult so we don't retain the full backtest JSON.
+        private readonly List<OptimizationBacktestMetrics> _completedBacktests = new();
+
         /// <summary>
         /// The total completed backtests count
         /// </summary>
@@ -59,28 +63,28 @@ namespace QuantConnect.Optimizer
         /// <summary>
         /// The optimization target
         /// </summary>
-        protected readonly Target OptimizationTarget;
+        protected Target OptimizationTarget { get; }
 
         /// <summary>
         /// Collection holding <see cref="ParameterSet"/> for each backtest id we are waiting to finish
         /// </summary>
-        protected readonly ConcurrentDictionary<string, ParameterSet> RunningParameterSetForBacktest;
+        protected ConcurrentDictionary<string, ParameterSet> RunningParameterSetForBacktest { get; init; }
 
         /// <summary>
         /// Collection holding <see cref="ParameterSet"/> for each backtest id we are waiting to launch
         /// </summary>
         /// <remarks>We can't launch 1 million backtests at the same time</remarks>
-        protected readonly ConcurrentQueue<ParameterSet> PendingParameterSet;
+        protected ConcurrentQueue<ParameterSet> PendingParameterSet { get; init; }
 
         /// <summary>
         /// The optimization strategy being used
         /// </summary>
-        protected readonly IOptimizationStrategy Strategy;
+        protected IOptimizationStrategy Strategy { get; init; }
 
         /// <summary>
         /// The optimization packet
         /// </summary>
-        protected readonly OptimizationNodePacket NodePacket;
+        protected OptimizationNodePacket NodePacket { get; init; }
 
         /// <summary>
         /// Indicates whether optimizer was disposed
@@ -183,6 +187,29 @@ namespace QuantConnect.Optimizer
 
             // we clean up before we send an update so that the runtime stats are updated
             CleanUpRunningInstance();
+
+            // Set Analysis before ProcessUpdate so SendUpdate can upload it; guarded so analyzer failure never breaks the optimization.
+            if (result != null)
+            {
+                try
+                {
+                    // Snapshot under the lock so a late NewResult on another thread can't mutate the list mid-enumeration.
+                    List<OptimizationBacktestMetrics> backtestsSnapshot;
+                    lock (_completedBacktests)
+                    {
+                        backtestsSnapshot = new List<OptimizationBacktestMetrics>(_completedBacktests);
+                    }
+                    var parameters = new OptimizationAnalysisRunParameters(
+                        backtestsSnapshot,
+                        NodePacket.OptimizationParameters);
+                    result.Analysis = new OptimizationAnalyzer().Run(parameters);
+                }
+                catch (Exception ex)
+                {
+                    Log.Error(ex, "Error running optimization analysis");
+                }
+            }
+
             ProcessUpdate(forceSend: true);
 
             Ended?.Invoke(this, result);
@@ -192,8 +219,17 @@ namespace QuantConnect.Optimizer
         /// Handles starting Lean for a given parameter set
         /// </summary>
         /// <param name="parameterSet">The parameter set for the backtest to run</param>
+        /// <param name="backtestName">The backtest name to use</param>
         /// <returns>The new unique backtest id</returns>
-        protected abstract string RunLean(ParameterSet parameterSet);
+        protected abstract string RunLean(ParameterSet parameterSet, string backtestName);
+
+        /// <summary>
+        /// Get's a new backtest name
+        /// </summary>
+        protected virtual string GetBacktestName(ParameterSet parameterSet)
+        {
+            return "OptimizationBacktest";
+        }
 
         /// <summary>
         /// Handles a new backtest json result matching a requested backtest id
@@ -219,10 +255,8 @@ namespace QuantConnect.Optimizer
 
                 // we got a new result if there are any pending parameterSet to run we can now trigger 1
                 // we do this before 'Strategy.PushNewResults' so FIFO is respected
-                if (PendingParameterSet.Count > 0)
+                if (PendingParameterSet.TryDequeue(out var pendingParameterSet))
                 {
-                    ParameterSet pendingParameterSet;
-                    PendingParameterSet.TryDequeue(out pendingParameterSet);
                     LaunchLeanForParameterSet(pendingParameterSet);
                 }
 
@@ -237,6 +271,17 @@ namespace QuantConnect.Optimizer
                 {
                     Interlocked.Increment(ref _completedBacktest);
                     result = new OptimizationResult(jsonBacktestResult, parameterSet, backtestId);
+                }
+
+                // Extract metrics now and drop the heavy JSON; null results (invalid parameters) are skipped.
+                var metrics = OptimizationBacktestMetrics.ExtractFrom(backtestId, parameterSet, jsonBacktestResult);
+                if (metrics != null)
+                {
+                    // Backtest results can arrive on different threads; guard _completedBacktests with its own lock.
+                    lock (_completedBacktests)
+                    {
+                        _completedBacktests.Add(metrics);
+                    }
                 }
 
                 // always notify the strategy
@@ -412,7 +457,8 @@ namespace QuantConnect.Optimizer
 
                 try
                 {
-                    var backtestId = RunLean(parameterSet);
+                    var backtestName = GetBacktestName(parameterSet);
+                    var backtestId = RunLean(parameterSet, backtestName);
 
                     if (!string.IsNullOrEmpty(backtestId))
                     {

@@ -16,6 +16,8 @@
 using System;
 using NUnit.Framework;
 using QuantConnect.Util;
+using static QuantConnect.Util.CurrencyPairUtil;
+
 
 namespace QuantConnect.Tests.Common.Util
 {
@@ -50,6 +52,16 @@ namespace QuantConnect.Tests.Common.Util
         public void IsDecomposableWorksCorrectly(Symbol symbol, bool expectedResult)
         {
             Assert.AreEqual(expectedResult, CurrencyPairUtil.IsDecomposable(symbol));
+        }
+
+        [TestCase("CHNTUSD", "CHN", "TUSD", Match.NoMatch)]
+        [TestCase("CHNTUSD", "CHNT", "USD", Match.ExactMatch)]
+        [TestCase("CHNTUSD", "USD", "CHNT", Match.InverseMatch)]
+        public void CurrencyPairMatchComparisonLogic(string symbolValue, string baseCurrency, string quoteCurrency, Match expectedResult)
+        {
+            var symbol = Symbol.Create(symbolValue, SecurityType.Crypto, Market.Bitfinex);
+            var result = CurrencyPairUtil.ComparePair(symbol, baseCurrency, quoteCurrency);
+            Assert.AreEqual(expectedResult, result);
         }
 
         [Test]
@@ -103,6 +115,44 @@ namespace QuantConnect.Tests.Common.Util
             Assert.AreEqual(CurrencyPairUtil.Match.ExactMatch, ethusd.ComparePair("ETH", "USD"));
             Assert.AreEqual(CurrencyPairUtil.Match.InverseMatch, eurusd.ComparePair("USD", "EUR"));
             Assert.AreEqual(CurrencyPairUtil.Match.NoMatch, ethusd.ComparePair("BTC", "USD"));
+        }
+
+        [Test]
+        public void ComparePairWorksCorrectlyStableCoinsExactMatch()
+        {
+            var btcusdt = Symbol.Create("BTCUSDT", SecurityType.Crypto, Market.Binance);
+            var btcxchf = Symbol.Create("BTCXCHF", SecurityType.Crypto, Market.Bitfinex);
+
+            Assert.AreEqual(CurrencyPairUtil.Match.ExactMatch, btcusdt.ComparePair("BTC", "USD"));
+            Assert.AreEqual(CurrencyPairUtil.Match.ExactMatch, btcxchf.ComparePair("BTC", "CHF"));
+        }
+
+        [Test]
+        public void ComparePairWorksCorrectlyStableCoinsInverseMatch()
+        {
+            var btcusdt = Symbol.Create("BTCUSDT", SecurityType.Crypto, Market.Binance);
+            var btcxchf = Symbol.Create("BTCXCHF", SecurityType.Crypto, Market.Bitfinex);
+
+            Assert.AreEqual(CurrencyPairUtil.Match.InverseMatch, btcusdt.ComparePair("USD", "BTC"));
+            Assert.AreEqual(CurrencyPairUtil.Match.InverseMatch, btcxchf.ComparePair("CHF", "BTC"));
+        }
+
+        [Test]
+        public void ComparePairWorksCorrectlyStableCoinsNoMatch()
+        {
+            var btceur = Symbol.Create("BTCEUR", SecurityType.Crypto, Market.Binance);
+            var btcidr = Symbol.Create("BTCIDR", SecurityType.Crypto, Market.Binance);
+
+            Assert.AreEqual(CurrencyPairUtil.Match.NoMatch, btceur.ComparePair("BTC", "USD"));
+            Assert.AreEqual(CurrencyPairUtil.Match.NoMatch, btcidr.ComparePair("BTC", "EUR"));
+        }
+
+        [Test]
+        public void ComparePairWorksCorrectlyWithDoubleStableCoinMatch()
+        {
+            var idrusd = Symbol.Create("IDRUSD", SecurityType.Crypto, Market.Binance);
+
+            Assert.AreEqual(CurrencyPairUtil.Match.ExactMatch, idrusd.ComparePair("IDRT", "USDT"));
         }
 
         /// <summary>

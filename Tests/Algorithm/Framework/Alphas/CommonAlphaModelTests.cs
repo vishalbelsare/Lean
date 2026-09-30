@@ -26,10 +26,12 @@ using QuantConnect.Securities;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Python.Runtime;
 using QuantConnect.Algorithm;
 using QuantConnect.Python;
 using QuantConnect.Tests.Common.Data.UniverseSelection;
 using QuantConnect.Tests.Engine.DataFeeds;
+using QuantConnect.Util;
 
 namespace QuantConnect.Tests.Algorithm.Framework.Alphas
 {
@@ -38,8 +40,7 @@ namespace QuantConnect.Tests.Algorithm.Framework.Alphas
     /// </summary>
     public abstract class CommonAlphaModelTests
     {
-        protected QCAlgorithm Algorithm;
-        protected ZipDataCacheProvider ZipCacheProvider;
+        protected QCAlgorithm Algorithm { get; set; }
 
         [OneTimeSetUp]
         public void Initialize()
@@ -114,7 +115,7 @@ namespace QuantConnect.Tests.Algorithm.Framework.Alphas
                     Assert.AreEqual(expected.Symbol, actual.Symbol);
                     Assert.AreEqual(expected.Type, actual.Type);
                     Assert.AreEqual(expected.Direction, actual.Direction);
-                    Assert.AreEqual(expected.Period, actual.Period);
+                    Assert.LessOrEqual(expected.Period, actual.Period);         // It can be canceled and discarded early
                     Assert.AreEqual(expected.Magnitude, actual.Magnitude);
                     Assert.AreEqual(expected.Confidence, actual.Confidence);
                 }
@@ -174,7 +175,7 @@ namespace QuantConnect.Tests.Algorithm.Framework.Alphas
                 Assert.AreEqual(expected.Symbol, actual.Symbol);
                 Assert.AreEqual(expected.Type, actual.Type);
                 Assert.AreEqual(expected.Direction, actual.Direction);
-                Assert.AreEqual(expected.Period, actual.Period);
+                Assert.LessOrEqual(expected.Period, actual.Period);         // It can be canceled and discarded early
                 Assert.AreEqual(expected.Magnitude, actual.Magnitude);
                 Assert.AreEqual(expected.Confidence, actual.Confidence);
             }
@@ -207,7 +208,11 @@ namespace QuantConnect.Tests.Algorithm.Framework.Alphas
                 Assert.Ignore($"Ignore {GetType().Name}: Could not create {language} model.");
             }
 
-            var changes = SecurityChangesTests.CreateNonInternal(RemovedSecurities, AddedSecurities);
+            var removedSecurities = Algorithm.Securities.Values;
+
+            // We have to add some security if we then want to remove it, that's why we cannot use here
+            // RemovedSecurities, because it doesn't contain any security
+            var changes = SecurityChangesTests.CreateNonInternal(removedSecurities, AddedSecurities);
 
             Assert.DoesNotThrow(() => model.OnSecuritiesChanged(Algorithm, changes));
         }
@@ -257,6 +262,17 @@ namespace QuantConnect.Tests.Algorithm.Framework.Alphas
         /// To be override for model types that implement <see cref="INamedModel"/>
         /// </summary>
         protected abstract string GetExpectedModelName(IAlphaModel model);
+
+        /// <summary>
+        /// Gets the display string of the given enum value as rendered in the model's language:
+        /// Python models render enum values in the Python convention, e.g. Resolution.Daily as DAILY
+        /// </summary>
+        protected static string GetEnumString(Enum value, IAlphaModel model)
+        {
+            return model is AlphaModelPythonWrapper
+                ? value.ToString().ToSnakeCase(constant: true)
+                : value.ToString();
+        }
 
         /// <summary>
         /// Provides derived types a chance to initialize anything special they require
@@ -318,17 +334,18 @@ namespace QuantConnect.Tests.Algorithm.Framework.Alphas
         protected void SetUpHistoryProvider()
         {
             Algorithm.HistoryProvider = new SubscriptionDataReaderHistoryProvider();
-            ZipCacheProvider = new ZipDataCacheProvider(TestGlobals.DataProvider);
             Algorithm.HistoryProvider.Initialize(new HistoryProviderInitializeParameters(
                 null,
                 null,
                 TestGlobals.DataProvider,
-                ZipCacheProvider,
+                TestGlobals.DataCacheProvider,
                 TestGlobals.MapFileProvider,
                 TestGlobals.FactorFileProvider,
                 null,
                 false,
-                new DataPermissionManager()));
+                new DataPermissionManager(),
+                Algorithm.ObjectStore,
+                Algorithm.Settings));
         }
 
         /// <summary>

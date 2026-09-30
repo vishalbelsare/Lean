@@ -18,6 +18,7 @@ using System.Collections.Generic;
 using System.Linq;
 using NodaTime;
 using NUnit.Framework;
+using Python.Runtime;
 using QuantConnect.Data.UniverseSelection;
 using QuantConnect.Scheduling;
 using QuantConnect.Securities;
@@ -40,15 +41,16 @@ namespace QuantConnect.Tests.Common.Data.UniverseSelection
             _timekeeper = new TimeKeeper(new DateTime(2000, 1, 1), _timezone);
             _securities = new SecurityManager(_timekeeper);
 
-            _dateRules = new DateRules(_securities, _timezone);
-            _timeRules = new TimeRules(_securities, _timezone);
+            var mhdb = MarketHoursDatabase.FromDataFolder();
+            _dateRules = new DateRules(null, _securities, _timezone, mhdb);
+            _timeRules = new TimeRules(null, _securities, _timezone, mhdb);
         }
 
         [Test]
         public void TimeTriggeredDoesNotReturnPastTimes()
         {
             // Schedule our universe for 12PM each day
-            var universe = new ScheduledUniverse( 
+            using var universe = new ScheduledUniverse(
                 _dateRules.EveryDay(), _timeRules.At(12, 0),
                 (time =>
                 {
@@ -83,6 +85,40 @@ namespace QuantConnect.Tests.Common.Data.UniverseSelection
         }
 
         [Test]
+        public void TimeTriggeredDoesNotReturnTimesAfterEndTime()
+        {
+            // Schedule our universe for 12PM each day
+            using var universe = new ScheduledUniverse(
+                _dateRules.EveryDay(), _timeRules.At(12, 0),
+                time => new List<Symbol>()
+            );
+
+            var start = new DateTime(2000, 1, 5, 8, 0, 0).ConvertToUtc(_timezone);
+            var end = new DateTime(2000, 1, 5, 11, 0, 0).ConvertToUtc(_timezone);
+
+            // Get our trigger times
+            var triggerTimes = universe.GetTriggerTimes(start, end, MarketHoursDatabase.AlwaysOpen).ToList();
+
+            // Assert that there are no trigger times because 12PM is after the end time of 11AM
+            Assert.IsEmpty(triggerTimes);
+        }
+
+        [Test]
+        public void PythonConstructorThrowsDescriptiveErrorWhenSelectorIsNotAFunction()
+        {
+            using (Py.GIL())
+            {
+                using var pySelector = "not a function".ToPython();
+                var exception = Assert.Throws<ArgumentException>(() =>
+                    new ScheduledUniverse(_dateRules.EveryDay(), _timeRules.At(12, 0), pySelector));
+
+                Assert.That(exception.Message, Does.Contain("'not a function'"));
+                Assert.That(exception.Message, Does.Contain("'str'"));
+                Assert.That(exception.Message, Does.Contain("it is not a function"));
+            }
+        }
+
+        [Test]
         public void TriggerTimesNone()
         {
             // Test to see what happens when we expect no trigger times.
@@ -90,12 +126,12 @@ namespace QuantConnect.Tests.Common.Data.UniverseSelection
             // on a single day from 3pm-4pm, meaning we should get none.
             var timezone = TimeZones.NewYork;
             var start = new DateTime(2000, 1, 5, 15, 0, 0);
-            var end = new DateTime(2000, 1, 5, 16,0,0);
+            var end = new DateTime(2000, 1, 5, 16, 0, 0);
 
             var dateRule = _dateRules.EveryDay();
             var timeRule = _timeRules.At(12, 0);
 
-            var universe = new ScheduledUniverse(dateRule, timeRule, time =>
+            using var universe = new ScheduledUniverse(dateRule, timeRule, time =>
             {
                 return new List<Symbol>();
             });

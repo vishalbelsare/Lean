@@ -18,8 +18,10 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using QuantConnect.Data;
+using QuantConnect.Data.UniverseSelection;
 using QuantConnect.Interfaces;
 using QuantConnect.Securities;
+using QuantConnect.Securities.Future;
 
 namespace QuantConnect.Algorithm.CSharp
 {
@@ -31,14 +33,16 @@ namespace QuantConnect.Algorithm.CSharp
     /// <meta name="tag" content="futures" />
     public class BasicTemplateFuturesDailyAlgorithm : QCAlgorithm, IRegressionAlgorithmDefinition
     {
-        private Symbol _contractSymbol;
         protected virtual Resolution Resolution => Resolution.Daily;
+        protected virtual bool ExtendedMarketHours => false;
 
         // S&P 500 EMini futures
         private const string RootSP500 = Futures.Indices.SP500EMini;
 
         // Gold futures
         private const string RootGold = Futures.Metals.Gold;
+        private Future _futureSP500;
+        private Future _futureGold;
 
         /// <summary>
         /// Initialize your algorithm and add desired assets.
@@ -49,14 +53,14 @@ namespace QuantConnect.Algorithm.CSharp
             SetEndDate(2014, 10, 10);
             SetCash(1000000);
 
-            var futureSP500 = AddFuture(RootSP500, Resolution);
-            var futureGold = AddFuture(RootGold, Resolution);
+            _futureSP500 = AddFuture(RootSP500, Resolution, extendedMarketHours: ExtendedMarketHours);
+            _futureGold = AddFuture(RootGold, Resolution, extendedMarketHours: ExtendedMarketHours);
 
             // set our expiry filter for this futures chain
             // SetFilter method accepts TimeSpan objects or integer for days.
-            // The following statements yield the same filtering criteria 
-            futureSP500.SetFilter(TimeSpan.Zero, TimeSpan.FromDays(182));
-            futureGold.SetFilter(0, 182);
+            // The following statements yield the same filtering criteria
+            _futureSP500.SetFilter(TimeSpan.Zero, TimeSpan.FromDays(182));
+            _futureGold.SetFilter(0, 182);
         }
 
         /// <summary>
@@ -76,15 +80,17 @@ namespace QuantConnect.Algorithm.CSharp
                         select futuresContract
                     ).FirstOrDefault();
 
-                    // if found, trade it
-                    if (contract != null && IsMarketOpen(contract.Symbol))
+                    // if found, trade it.
+                    // Also check if exchange is open for regular or extended hours. Since daily data comes at 8PM, this allows us prevent the
+                    // algorithm from trading on friday when there is not after-market.
+                    if (contract != null)
                     {
-                        _contractSymbol = contract.Symbol;
-                        MarketOrder(_contractSymbol, 1);
+                        MarketOrder(contract.Symbol, 1);
                     }
                 }
             }
-            else
+            // Same as above, check for cases like trading on a friday night.
+            else if (Securities.Values.Where(x => x.Invested).All(x => x.Exchange.Hours.IsOpen(Time, true)))
             {
                 Liquidate();
             }
@@ -93,8 +99,18 @@ namespace QuantConnect.Algorithm.CSharp
             {
                 if (Time.TimeOfDay != TimeSpan.Zero)
                 {
-                    throw new Exception($"{Time} unexpected symbol changed event {changedEvent}!");
+                    throw new RegressionTestException($"{Time} unexpected symbol changed event {changedEvent}!");
                 }
+            }
+        }
+
+        public override void OnSecuritiesChanged(SecurityChanges changes)
+        {
+            if (changes.RemovedSecurities.Count > 0 &&
+                Portfolio.Invested &&
+                Securities.Values.Where(x => x.Invested).All(x => x.Exchange.Hours.IsOpen(Time, true)))
+            {
+                Liquidate();
             }
         }
 
@@ -106,55 +122,56 @@ namespace QuantConnect.Algorithm.CSharp
         /// <summary>
         /// This is used by the regression test system to indicate which languages this algorithm is written in.
         /// </summary>
-        public virtual Language[] Languages { get; } = { Language.CSharp, Language.Python };
+        public virtual List<Language> Languages { get; } = new() { Language.CSharp, Language.Python };
+
+        /// <summary>
+        /// Data Points count of all timeslices of algorithm
+        /// </summary>
+        public virtual long DataPoints => 5876;
+
+        /// <summary>
+        /// Data Points count of the algorithm history
+        /// </summary>
+        public virtual int AlgorithmHistoryDataPoints => 0;
+
+        /// <summary>
+        /// Final status of the algorithm
+        /// </summary>
+        public AlgorithmStatus AlgorithmStatus => AlgorithmStatus.Completed;
 
         /// <summary>
         /// This is used by the regression test system to indicate what the expected statistics are from running the algorithm
         /// </summary>
         public virtual Dictionary<string, string> ExpectedStatistics => new Dictionary<string, string>
         {
-            {"Total Trades", "92"},
-            {"Average Win", "0.08%"},
-            {"Average Loss", "-0.01%"},
-            {"Compounding Annual Return", "-0.450%"},
-            {"Drawdown", "0.500%"},
-            {"Expectancy", "-0.824"},
-            {"Net Profit", "-0.453%"},
-            {"Sharpe Ratio", "-1.803"},
-            {"Probabilistic Sharpe Ratio", "0%"},
-            {"Loss Rate", "98%"},
-            {"Win Rate", "2%"},
-            {"Profit-Loss Ratio", "7.09"},
-            {"Alpha", "-0.003"},
-            {"Beta", "-0.001"},
+            {"Total Orders", "22"},
+            {"Average Win", "0.24%"},
+            {"Average Loss", "-0.49%"},
+            {"Compounding Annual Return", "-0.252%"},
+            {"Drawdown", "0.300%"},
+            {"Expectancy", "-0.258"},
+            {"Start Equity", "1000000"},
+            {"End Equity", "997465.73"},
+            {"Net Profit", "-0.253%"},
+            {"Sharpe Ratio", "-5.753"},
+            {"Sortino Ratio", "-1.032"},
+            {"Probabilistic Sharpe Ratio", "0.000%"},
+            {"Loss Rate", "50%"},
+            {"Win Rate", "50%"},
+            {"Profit-Loss Ratio", "0.48"},
+            {"Alpha", "-0.009"},
+            {"Beta", "0"},
             {"Annual Standard Deviation", "0.002"},
             {"Annual Variance", "0"},
-            {"Information Ratio", "-1.394"},
+            {"Information Ratio", "-1.381"},
             {"Tracking Error", "0.089"},
-            {"Treynor Ratio", "4.298"},
-            {"Total Fees", "$170.20"},
-            {"Estimated Strategy Capacity", "$36000.00"},
-            {"Lowest Capacity Asset", "ES VP274HSU1AF5"},
-            {"Fitness Score", "0.009"},
-            {"Kelly Criterion Estimate", "0"},
-            {"Kelly Criterion Probability Value", "0"},
-            {"Sortino Ratio", "-0.8"},
-            {"Return Over Maximum Drawdown", "-0.992"},
-            {"Portfolio Turnover", "0.025"},
-            {"Total Insights Generated", "0"},
-            {"Total Insights Closed", "0"},
-            {"Total Insights Analysis Completed", "0"},
-            {"Long Insight Count", "0"},
-            {"Short Insight Count", "0"},
-            {"Long/Short Ratio", "100%"},
-            {"Estimated Monthly Alpha Value", "$0"},
-            {"Total Accumulated Estimated Alpha Value", "$0"},
-            {"Mean Population Estimated Insight Value", "$0"},
-            {"Mean Population Direction", "0%"},
-            {"Mean Population Magnitude", "0%"},
-            {"Rolling Averaged Population Direction", "0%"},
-            {"Rolling Averaged Population Magnitude", "0%"},
-            {"OrderListHash", "09b2f274fa2385597a803e58b784f675"}
+            {"Treynor Ratio", "-19.581"},
+            {"Total Fees", "$6.77"},
+            {"Estimated Strategy Capacity", "$290000000.00"},
+            {"Lowest Capacity Asset", "GC VOFJUCDY9XNH"},
+            {"Portfolio Turnover", "0.12%"},
+            {"Drawdown Recovery", "0"},
+            {"OrderListHash", "140ff4560d532192be3041846667deca"}
         };
     }
 }

@@ -1,4 +1,4 @@
-﻿/*
+/*
  * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
  * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
  *
@@ -36,7 +36,7 @@ namespace QuantConnect.Securities
         /// <param name="seedFunction">The seed function to use</param>
         public FuncSecuritySeeder(PyObject seedFunction)
         {
-            var result = seedFunction.ConvertToDelegate<Func<Security, object>>();
+            var result = seedFunction.SafeAs<Func<Security, object>>();
             _seedFunction = security =>
             {
                 var dataObject = result(security);
@@ -85,19 +85,19 @@ namespace QuantConnect.Securities
                     {
                         gotData = true;
                         security.SetMarketPrice(seedData);
-                        Log.Debug($"FuncSecuritySeeder.SeedSecurity(): Seeded security: {seedData.Symbol.Value}: {seedData.GetType()} {seedData.Value}");
+                        Log.Debug("FuncSecuritySeeder.SeedSecurity(): " + Messages.FuncSecuritySeeder.SeededSecurityInfo(seedData));
                     }
 
                     if (!gotData)
                     {
-                        Log.Trace($"FuncSecuritySeeder.SeedSecurity(): Unable to seed security: {security.Symbol.Value}");
+                        Log.Trace("FuncSecuritySeeder.SeedSecurity(): " + Messages.FuncSecuritySeeder.UnableToSeedSecurity(security));
                         return false;
                     }
                 }
             }
             catch (Exception exception)
             {
-                Log.Trace($"FuncSecuritySeeder.SeedSecurity(): Could not seed price for security {security.Symbol}: {exception}");
+                Log.Trace("FuncSecuritySeeder.SeedSecurity(): " + Messages.FuncSecuritySeeder.UnableToSecurityPrice(security) + $": {exception}");
                 return false;
             }
 

@@ -13,14 +13,10 @@
  * limitations under the License.
 */
 
-using System;
-using System.Reflection;
-using System.Reflection.Emit;
 using QuantConnect.Benchmarks;
 using QuantConnect.Orders;
 using QuantConnect.Orders.Fees;
 using QuantConnect.Securities;
-using static QuantConnect.StringExtensions;
 using static QuantConnect.Util.SecurityExtensions;
 
 namespace QuantConnect.Brokerages
@@ -65,21 +61,22 @@ namespace QuantConnect.Brokerages
         /// <returns>True if the brokerage could process the order, false otherwise</returns>
         public override bool CanSubmitOrder(Security security, Order order, out BrokerageMessageEvent message)
         {
+            if (!this.ValidateContingentOrdersNotSupported(order, out message))
+            {
+                return false;
+            }
+
             message = null;
 
             if (order == null)
             {
-                message = new BrokerageMessageEvent(BrokerageMessageType.Warning, "NotSupported",
-                    Invariant($"Order is null.")
-                );
+                message = new BrokerageMessageEvent(BrokerageMessageType.Warning, "NotSupported", Messages.ExanteBrokerageModel.NullOrder);
                 return false;
             }
 
             if (order.Price == 0m)
             {
-                message = new BrokerageMessageEvent(BrokerageMessageType.Warning, "NotSupported",
-                    Invariant($"Price is not set.")
-                );
+                message = new BrokerageMessageEvent(BrokerageMessageType.Warning, "NotSupported", Messages.ExanteBrokerageModel.PriceNotSet);
                 return false;
             }
 
@@ -93,9 +90,7 @@ namespace QuantConnect.Brokerages
                 security.Type != SecurityType.Index)
             {
                 message = new BrokerageMessageEvent(BrokerageMessageType.Warning, "NotSupported",
-                    Invariant(
-                        $"The {nameof(ExanteBrokerageModel)} does not support {security.Type} security type.")
-                );
+                    Messages.DefaultBrokerageModel.UnsupportedSecurityType(this, security));
                 return false;
             }
 

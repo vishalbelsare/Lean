@@ -56,7 +56,7 @@ namespace QuantConnect.Tests.Common.Data.Auxiliary
         public void Retrieves()
         {
             var fileProviderTest = new LocalZipMapFileProviderTest();
-            var dataProviderTest = new DefaultDataProviderTest();
+            using var dataProviderTest = new DefaultDataProviderTest();
             fileProviderTest.Initialize(dataProviderTest);
 
             var mapFileResolver = fileProviderTest.Get(AuxiliaryDataKey.EquityUsa);
@@ -71,8 +71,9 @@ namespace QuantConnect.Tests.Common.Data.Auxiliary
         public void CacheIsCleared()
         {
             var fileProviderTest = new LocalZipMapFileProviderTest();
-            var dataProviderTest = new DefaultDataProviderTest();
+            using var dataProviderTest = new DefaultDataProviderTest();
             fileProviderTest.Initialize(dataProviderTest);
+            fileProviderTest.CacheCleared.Reset();
 
             fileProviderTest.Get(AuxiliaryDataKey.EquityUsa);
             Assert.AreEqual(1, dataProviderTest.FetchCount);
@@ -80,8 +81,7 @@ namespace QuantConnect.Tests.Common.Data.Auxiliary
             fileProviderTest.Get(AuxiliaryDataKey.EquityUsa);
             Assert.AreEqual(1, dataProviderTest.FetchCount);
 
-            Thread.Sleep(1000);
-
+            fileProviderTest.CacheCleared.WaitOne(TimeSpan.FromSeconds(2));
             fileProviderTest.Get(AuxiliaryDataKey.EquityUsa);
             Assert.AreEqual(2, dataProviderTest.FetchCount);
 
@@ -92,13 +92,15 @@ namespace QuantConnect.Tests.Common.Data.Auxiliary
         private class LocalZipMapFileProviderTest : LocalZipMapFileProvider
         {
             public bool Enabled = true;
-            protected override TimeSpan CacheRefreshPeriod => TimeSpan.FromMilliseconds(500);
+            public readonly ManualResetEvent CacheCleared = new(false);
+            protected override TimeSpan CacheRefreshPeriod => TimeSpan.FromMilliseconds(300);
 
             protected override void StartExpirationTask()
             {
                 if (Enabled)
                 {
                     base.StartExpirationTask();
+                    CacheCleared.Set();
                 }
             }
         }

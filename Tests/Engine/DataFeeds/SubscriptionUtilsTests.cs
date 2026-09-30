@@ -32,7 +32,7 @@ using QuantConnect.Util;
 
 namespace QuantConnect.Tests.Engine.DataFeeds
 {
-    [TestFixture, Parallelizable(ParallelScope.All)]
+    [TestFixture, Parallelizable(ParallelScope.Fixtures)]
     public class SubscriptionUtilsTests
     {
         private Security _security;
@@ -65,8 +65,8 @@ namespace QuantConnect.Tests.Engine.DataFeeds
         public void SubscriptionIsDisposed()
         {
             var dataPoints = 10;
-            var enumerator = new TestDataEnumerator { MoveNextTrueCount = dataPoints };
-
+            using var enumerator = new TestDataEnumerator { MoveNextTrueCount = dataPoints };
+            #pragma warning disable CA2000
             var subscription = SubscriptionUtils.CreateAndScheduleWorker(
                 new SubscriptionRequest(
                     false,
@@ -78,7 +78,8 @@ namespace QuantConnect.Tests.Engine.DataFeeds
                 ),
                 enumerator,
                 _factorFileProvider,
-                false);
+                false, false);
+            #pragma warning restore CA2000
 
             var count = 0;
             while (enumerator.MoveNextTrueCount > 8)
@@ -97,9 +98,9 @@ namespace QuantConnect.Tests.Engine.DataFeeds
         [Test]
         public void ThrowingEnumeratorStackDisposesOfSubscription()
         {
-            var enumerator = new TestDataEnumerator { MoveNextTrueCount = 10, ThrowException = true};
+            using var enumerator = new TestDataEnumerator { MoveNextTrueCount = 10, ThrowException = true};
 
-            var subscription = SubscriptionUtils.CreateAndScheduleWorker(
+            using var subscription = SubscriptionUtils.CreateAndScheduleWorker(
                 new SubscriptionRequest(
                     false,
                     null,
@@ -110,7 +111,7 @@ namespace QuantConnect.Tests.Engine.DataFeeds
                 ),
                 enumerator,
                 _factorFileProvider,
-                false);
+                false, false);
 
             var count = 0;
             while (enumerator.MoveNextTrueCount != 9)
@@ -145,8 +146,8 @@ namespace QuantConnect.Tests.Engine.DataFeeds
             {
                 var dataPoints = 10;
 
-                var enumerator = new TestDataEnumerator {MoveNextTrueCount = dataPoints};
-
+                using var enumerator = new TestDataEnumerator {MoveNextTrueCount = dataPoints};
+                #pragma warning disable CA2000
                 var subscription = SubscriptionUtils.CreateAndScheduleWorker(
                     new SubscriptionRequest(
                         false,
@@ -158,8 +159,8 @@ namespace QuantConnect.Tests.Engine.DataFeeds
                     ),
                     enumerator,
                     _factorFileProvider,
-                    false);
-
+                    false, false);
+                #pragma warning restore CA2000
                 for (var j = 0; j < dataPoints; j++)
                 {
                    Assert.IsTrue(subscription.MoveNext());
@@ -189,7 +190,7 @@ namespace QuantConnect.Tests.Engine.DataFeeds
             }, referenceTime);
 
             factorFileProfider.Setup(s => s.Get(It.IsAny<Symbol>())).Returns(factorFile);
-
+            #pragma warning disable CA2000
             var subscription = SubscriptionUtils.CreateAndScheduleWorker(
                 new SubscriptionRequest(
                     false,
@@ -201,8 +202,8 @@ namespace QuantConnect.Tests.Engine.DataFeeds
                 ),
                 enumerator,
                 factorFileProfider.Object,
-                true);
-
+                true, false);
+            #pragma warning restore CA2000
             Assert.IsTrue(subscription.MoveNext());
             // we do expect it to pick up the prev factor file scale
             Assert.AreEqual(1, (subscription.Current.Data as Tick).AskPrice);
@@ -224,7 +225,6 @@ namespace QuantConnect.Tests.Engine.DataFeeds
             point2.Time = referenceTime.AddDays(1);
             var point3 = point.Clone(false);
             point3.Time = referenceTime.AddDays(2);
-            ;
             var enumerator = new List<BaseData> { point, point2, point3 }.GetEnumerator();
             var factorFileProfider = new Mock<IFactorFileProvider>();
 
@@ -235,7 +235,7 @@ namespace QuantConnect.Tests.Engine.DataFeeds
             }, referenceTime);
 
             factorFileProfider.Setup(s => s.Get(It.IsAny<Symbol>())).Returns(factorFile);
-
+            #pragma warning disable CA2000
             var subscription = SubscriptionUtils.CreateAndScheduleWorker(
                 new SubscriptionRequest(
                     false,
@@ -247,8 +247,8 @@ namespace QuantConnect.Tests.Engine.DataFeeds
                 ),
                 enumerator,
                 factorFileProfider.Object,
-                true);
-
+                true, false);
+            #pragma warning restore CA2000
             Assert.IsTrue(subscription.MoveNext());
             Assert.AreEqual(1, (subscription.Current.Data as Tick).AskPrice);
             Assert.IsFalse((subscription.Current.Data as Tick).IsFillForward);
@@ -274,6 +274,7 @@ namespace QuantConnect.Tests.Engine.DataFeeds
             var totalPoints = 8;
             var time = new DateTime(2010, 1, 1);
             var enumerator = Enumerable.Range(0, totalPoints).Select(x => new Delisting { Time = time.AddHours(x) }).GetEnumerator();
+            #pragma warning disable CA2000
             var subscription = SubscriptionUtils.CreateAndScheduleWorker(
                 new SubscriptionRequest(
                     false,
@@ -285,8 +286,8 @@ namespace QuantConnect.Tests.Engine.DataFeeds
                 ),
                 enumerator,
                 _factorFileProvider,
-                false);
-
+                false, false);
+            #pragma warning restore CA2000
             // Test our subscription stream to see if it emits the aux data it should be filtered
             // by the SubscriptionUtils produce function if the config isn't for a TradeBar
             int dataReceivedCount = 0;
@@ -311,6 +312,116 @@ namespace QuantConnect.Tests.Engine.DataFeeds
             }
         }
 
+        [Test]
+        public void ScheduleEnumeratorEmitsDataInOrderAndEnds()
+        {
+            // more than a single work batch so the worker has to run multiple sprints
+            var dataPoints = new List<BaseData>();
+            for (var i = 0; i < 120; i++)
+            {
+                dataPoints.Add(new Tick(DateTime.UtcNow, Symbols.SPY, i, i));
+            }
+            var enumerator = new TestSequenceEnumerator(dataPoints);
+
+            using var result = SubscriptionUtils.ScheduleEnumerator(Symbols.SPY, enumerator);
+
+            var count = 0;
+            while (result.MoveNext())
+            {
+                Assert.IsNotNull(result.Current);
+                Assert.AreEqual(count++, result.Current.Value);
+            }
+            Assert.AreEqual(120, count);
+            Assert.IsFalse(result.MoveNext());
+            AssertDisposed(enumerator);
+        }
+
+        [Test]
+        public void ScheduleEnumeratorEndsOnNullDataPoint()
+        {
+            // in live mode enumerators return true with a null current value when they have no more data
+            var enumerator = new TestSequenceEnumerator(new List<BaseData>
+            {
+                new Tick(DateTime.UtcNow, Symbols.SPY, 1, 2),
+                null,
+                new Tick(DateTime.UtcNow, Symbols.SPY, 3, 4)
+            });
+
+            using var result = SubscriptionUtils.ScheduleEnumerator(Symbols.SPY, enumerator);
+
+            Assert.IsTrue(result.MoveNext());
+            Assert.IsNotNull(result.Current);
+            Assert.IsFalse(result.MoveNext());
+            AssertDisposed(enumerator);
+        }
+
+        [Test]
+        public void ScheduleEnumeratorStopsWhenConsumerIsDisposed()
+        {
+            using var enumerator = new TestDataEnumerator { MoveNextTrueCount = int.MaxValue };
+
+            var result = SubscriptionUtils.ScheduleEnumerator(Symbols.SPY, enumerator);
+
+            Assert.IsTrue(result.MoveNext());
+            result.DisposeSafely();
+            AssertDisposed(enumerator);
+        }
+
+        [Test]
+        public void ScheduleEnumeratorThrowingEnumeratorEndsConsumer()
+        {
+            using var enumerator = new TestDataEnumerator { MoveNextTrueCount = 10, ThrowException = true };
+
+            using var result = SubscriptionUtils.ScheduleEnumerator(Symbols.SPY, enumerator);
+
+            Assert.IsFalse(result.MoveNext());
+            AssertDisposed(enumerator);
+        }
+
+        private static void AssertDisposed(dynamic enumerator)
+        {
+            var count = 0;
+            while (!enumerator.Disposed)
+            {
+                if (count++ > 500)
+                {
+                    Assert.Fail("Timeout waiting for the worker to dispose of the enumerator");
+                }
+                Thread.Sleep(1);
+            }
+        }
+
+        private class TestSequenceEnumerator : IEnumerator<BaseData>
+        {
+            private readonly IEnumerator<BaseData> _enumerator;
+
+            public bool Disposed { get; private set; }
+
+            public TestSequenceEnumerator(List<BaseData> data)
+            {
+                _enumerator = data.GetEnumerator();
+            }
+
+            public void Dispose()
+            {
+                Disposed = true;
+                _enumerator.Dispose();
+            }
+
+            public bool MoveNext()
+            {
+                return _enumerator.MoveNext();
+            }
+
+            public void Reset()
+            {
+            }
+
+            public BaseData Current => _enumerator.Current;
+
+            object IEnumerator.Current => Current;
+        }
+
         private class TestDataEnumerator : IEnumerator<BaseData>
         {
             public bool ThrowException { get; set; }
@@ -328,7 +439,7 @@ namespace QuantConnect.Tests.Engine.DataFeeds
                 var result = --MoveNextTrueCount >= 0;
                 if (ThrowException)
                 {
-                    throw new Exception("TestDataEnumerator.MoveNext()");
+                    throw new RegressionTestException("TestDataEnumerator.MoveNext()");
                 }
                 return result;
             }

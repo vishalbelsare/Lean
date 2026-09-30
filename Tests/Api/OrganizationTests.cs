@@ -28,27 +28,28 @@ namespace QuantConnect.Tests.API
         public void ReadAccount()
         {
             var account = ApiClient.ReadAccount();
+            var stringRepresentation = account.ToString();
+            Assert.IsTrue(ApiTestBase.IsValidJson(stringRepresentation));
 
             Assert.IsTrue(account.Success);
             Assert.IsNotEmpty(account.OrganizationId);
             Assert.IsNotNull(account.Card);
             Assert.AreNotEqual(default(DateTime), account.Card.Expiration);
             Assert.IsNotEmpty(account.Card.Brand);
-            Assert.AreNotEqual(0, account.Card.LastFourDigits);
-        }
-
-        [Test]
-        public void ListOrganization()
-        {
-            var list = ApiClient.ListOrganizations();
-            Assert.IsTrue(list.Count > 0);
+            Assert.IsNotEmpty(account.Card.LastFourDigits);
         }
 
         [Test]
         public void ReadOrganization()
         {
             var organization = ApiClient.ReadOrganization(TestOrganization);
-            Assert.IsNotNull(organization.Credit);
+            var stringRepresentation = organization.ToString();
+            Assert.IsTrue(ApiTestBase.IsValidJson(stringRepresentation));
+
+            Assert.AreNotEqual(default(DateTime), organization.DataAgreement.Signed);
+            Assert.AreNotEqual(0, organization.DataAgreement.EpochSignedTime);
+            Assert.AreNotEqual(0, organization.Credit.Balance);
+            Assert.AreNotEqual(0, organization.Products.Count);
         }
     }
 }

@@ -14,6 +14,7 @@
 from AlgorithmImports import *
 from QuantConnect.Tests import *
 from QuantConnect.Tests.Python import *
+from PandasMapper import PandasColumn
 
 # TODO: Rename to PandasResearchTests and keep this class for QB related tests; rename py module to PandasTests
 class PandasIndexingTests():
@@ -58,3 +59,18 @@ class PandasDataFrameTests():
         except KeyError as e:
             return str(e)
 
+    def test_contains_user_defined_columns_with_spaces(self, column_name):
+        # Adds a column, then try accessing it.
+        # If the colums has white spaces, it should not fail
+        df = self.spydf.copy()
+        df[column_name] = 1
+        try:
+            x = df[column_name]
+            return True
+        except:
+            return False
+
+    def test_column_equals_only_matching_string(self):
+        # A column label should only equal a matching string, never None/ints/floats
+        column = PandasColumn("shares")
+        return (not (column == None)) and (not (column == 0)) and (not (column == 123)) and (column == "shares")

@@ -137,14 +137,14 @@ namespace QuantConnect.Algorithm.CSharp
 
         public override void OnOrderEvent(OrderEvent orderEvent)
         {
-            Console.WriteLine($"{Time}: {orderEvent}");
+            Debug($"{Time}: {orderEvent}");
         }
 
         private void ExpectAdditions(SecurityChanges changes, params string[] tickers)
         {
             if (tickers == null && changes.AddedSecurities.Count > 0)
             {
-                throw new Exception($"{Time}: Expected no additions: {Time.DayOfWeek}");
+                throw new RegressionTestException($"{Time}: Expected no additions: {Time.DayOfWeek}");
             }
             if (tickers == null)
             {
@@ -155,7 +155,7 @@ namespace QuantConnect.Algorithm.CSharp
             {
                 if (changes.AddedSecurities.All(s => s.Symbol.Value != ticker))
                 {
-                    throw new Exception($"{Time}: Expected {ticker} to be added: {Time.DayOfWeek}");
+                    throw new RegressionTestException($"{Time}: Expected {ticker} to be added: {Time.DayOfWeek}");
                 }
             }
         }
@@ -164,7 +164,7 @@ namespace QuantConnect.Algorithm.CSharp
         {
             if (tickers == null && changes.RemovedSecurities.Count > 0)
             {
-                throw new Exception($"{Time}: Expected no removals: {Time.DayOfWeek}");
+                throw new RegressionTestException($"{Time}: Expected no removals: {Time.DayOfWeek}");
             }
 
             if (tickers == null)
@@ -176,7 +176,7 @@ namespace QuantConnect.Algorithm.CSharp
             {
                 if (changes.RemovedSecurities.All(s => s.Symbol.Value != ticker))
                 {
-                    throw new Exception($"{Time}: Expected {ticker} to be removed: {Time.DayOfWeek}");
+                    throw new RegressionTestException($"{Time}: Expected {ticker} to be removed: {Time.DayOfWeek}");
                 }
             }
         }
@@ -189,55 +189,56 @@ namespace QuantConnect.Algorithm.CSharp
         /// <summary>
         /// This is used by the regression test system to indicate which languages this algorithm is written in.
         /// </summary>
-        public Language[] Languages { get; } = { Language.CSharp, Language.Python };
+        public List<Language> Languages { get; } = new() { Language.CSharp, Language.Python };
+
+        /// <summary>
+        /// Data Points count of all timeslices of algorithm
+        /// </summary>
+        public long DataPoints => 987;
+
+        /// <summary>
+        /// Data Points count of the algorithm history
+        /// </summary>
+        public int AlgorithmHistoryDataPoints => 10;
+
+        /// <summary>
+        /// Final status of the algorithm
+        /// </summary>
+        public AlgorithmStatus AlgorithmStatus => AlgorithmStatus.Completed;
 
         /// <summary>
         /// This is used by the regression test system to indicate what the expected statistics are from running the algorithm
         /// </summary>
         public Dictionary<string, string> ExpectedStatistics => new Dictionary<string, string>
         {
-            {"Total Trades", "92"},
-            {"Average Win", "0.16%"},
-            {"Average Loss", "-0.08%"},
-            {"Compounding Annual Return", "50.130%"},
+            {"Total Orders", "59"},
+            {"Average Win", "0.28%"},
+            {"Average Loss", "-0.20%"},
+            {"Compounding Annual Return", "75.392%"},
             {"Drawdown", "1.100%"},
-            {"Expectancy", "0.887"},
-            {"Net Profit", "3.684%"},
-            {"Sharpe Ratio", "5.658"},
-            {"Probabilistic Sharpe Ratio", "93.094%"},
-            {"Loss Rate", "35%"},
-            {"Win Rate", "65%"},
-            {"Profit-Loss Ratio", "1.89"},
-            {"Alpha", "0.302"},
-            {"Beta", "0.193"},
-            {"Annual Standard Deviation", "0.059"},
-            {"Annual Variance", "0.003"},
-            {"Information Ratio", "2.471"},
-            {"Tracking Error", "0.072"},
-            {"Treynor Ratio", "1.723"},
-            {"Total Fees", "$42.35"},
-            {"Estimated Strategy Capacity", "$3200000.00"},
-            {"Lowest Capacity Asset", "IBM R735QTJ8XC9X"},
-            {"Fitness Score", "0.751"},
-            {"Kelly Criterion Estimate", "24.01"},
-            {"Kelly Criterion Probability Value", "0.075"},
-            {"Sortino Ratio", "43.136"},
-            {"Return Over Maximum Drawdown", "123.916"},
-            {"Portfolio Turnover", "0.751"},
-            {"Total Insights Generated", "55"},
-            {"Total Insights Closed", "53"},
-            {"Total Insights Analysis Completed", "53"},
-            {"Long Insight Count", "55"},
-            {"Short Insight Count", "0"},
-            {"Long/Short Ratio", "100%"},
-            {"Estimated Monthly Alpha Value", "$942079.8347"},
-            {"Total Accumulated Estimated Alpha Value", "$1027128.7087"},
-            {"Mean Population Estimated Insight Value", "$19379.7870"},
-            {"Mean Population Direction", "58.4906%"},
-            {"Mean Population Magnitude", "0%"},
-            {"Rolling Averaged Population Direction", "55.0223%"},
-            {"Rolling Averaged Population Magnitude", "0%"},
-            {"OrderListHash", "18209554e81f4169a66cd32f9c50462b"}
+            {"Expectancy", "0.749"},
+            {"Start Equity", "100000"},
+            {"End Equity", "105049.17"},
+            {"Net Profit", "5.049%"},
+            {"Sharpe Ratio", "7.229"},
+            {"Sortino Ratio", "10.917"},
+            {"Probabilistic Sharpe Ratio", "95.841%"},
+            {"Loss Rate", "27%"},
+            {"Win Rate", "73%"},
+            {"Profit-Loss Ratio", "1.39"},
+            {"Alpha", "0.477"},
+            {"Beta", "0.042"},
+            {"Annual Standard Deviation", "0.067"},
+            {"Annual Variance", "0.004"},
+            {"Information Ratio", "3.991"},
+            {"Tracking Error", "0.084"},
+            {"Treynor Ratio", "11.625"},
+            {"Total Fees", "$35.53"},
+            {"Estimated Strategy Capacity", "$2600000.00"},
+            {"Lowest Capacity Asset", "EURUSD 8G"},
+            {"Portfolio Turnover", "90.30%"},
+            {"Drawdown Recovery", "3"},
+            {"OrderListHash", "9af211e68f600642a2aaa58f3bec6380"}
         };
     }
 }

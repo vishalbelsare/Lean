@@ -14,9 +14,10 @@
 */
 
 using System;
-using System.Collections.Generic;
 using System.Threading;
 using QuantConnect.Util;
+using QuantConnect.Logging;
+using System.Collections.Generic;
 
 namespace QuantConnect.Scheduling
 {
@@ -26,13 +27,20 @@ namespace QuantConnect.Scheduling
     /// </summary>
     public class TimeMonitor : IDisposable
     {
+        private readonly int _monitorIntervalMs;
         private readonly Timer _timer;
         /// <summary>
         /// List to store the coming TimeConsumer objects
         /// </summary>
         /// <remarks>This field is protected because it's used in a test class 
         /// in `IsolatorLimitResultProviderTests.cs</remarks>
-        protected readonly List<TimeConsumer> TimeConsumers;
+        protected List<TimeConsumer> TimeConsumers { get; init; }
+
+        /// <summary>
+        /// Optional handler used to also surface long-running work warnings to the user,
+        /// e.g. through the result handler's debug messages. Engine logs alone don't reach the user's logs
+        /// </summary>
+        public Action<string> UserWarningHandler { get; set; }
 
         /// <summary>
         /// Returns the number of time consumers currently being monitored
@@ -53,19 +61,31 @@ namespace QuantConnect.Scheduling
         /// </summary>
         public TimeMonitor(int monitorIntervalMs = 100)
         {
+            _monitorIntervalMs = monitorIntervalMs;
             TimeConsumers = new List<TimeConsumer>();
             _timer = new Timer(state =>
             {
                 lock (TimeConsumers)
                 {
-                    RemoveAll();
-
-                    foreach (var consumer in TimeConsumers)
+                    try
                     {
-                        ProcessConsumer(consumer);
+                        RemoveAll();
+
+                        foreach (var consumer in TimeConsumers)
+                        {
+                            ProcessConsumer(consumer);
+                        }
+                    }
+                    finally
+                    {
+                        if (TimeConsumers.Count > 0)
+                        {
+                            // there's some remaning and we are at the timer callback so let's re schedule
+                            TrySchedule();
+                        }
                     }
                 }
-            }, null, monitorIntervalMs, monitorIntervalMs);
+            }, null, Timeout.Infinite, Timeout.Infinite);
         }
 
         /// <summary>
@@ -94,6 +114,22 @@ namespace QuantConnect.Scheduling
                 {
                     // pass
                 }
+
+                consumer.AdditionalMinutesRequested++;
+                if (consumer.Name != null)
+                {
+                    // name the long-running work: the first minute crossing is the actionable heads-up, later ones are informational
+                    var message = $"'{consumer.Name}' has been executing for over {consumer.AdditionalMinutesRequested} minute(s)";
+                    if (consumer.AdditionalMinutesRequested == 1)
+                    {
+                        Log.Error($"TimeMonitor.ProcessConsumer(): {message}. It will be stopped once the algorithm time loop limit is exhausted");
+                        UserWarningHandler?.Invoke($"Warning: {message}. It will be stopped once the algorithm time loop limit is exhausted");
+                    }
+                    else
+                    {
+                        Log.Trace($"TimeMonitor.ProcessConsumer(): {message}");
+                    }
+                }
             }
         }
 
@@ -115,6 +151,11 @@ namespace QuantConnect.Scheduling
         {
             lock (TimeConsumers)
             {
+                if (TimeConsumers.Count == 0)
+                {
+                    // there was none left, schedule is not running, let's schedule it
+                    TrySchedule();
+                }
                 TimeConsumers.Add(consumer);
             }
         }
@@ -125,6 +166,21 @@ namespace QuantConnect.Scheduling
         public void Dispose()
         {
             _timer.DisposeSafely();
+        }
+
+        /// <summary>
+        /// Lazy scheduling
+        /// </summary>
+        private void TrySchedule()
+        {
+            try
+            {
+                _timer.Change(Time.GetSecondUnevenWait(_monitorIntervalMs), Timeout.Infinite);
+            }
+            catch (ObjectDisposedException)
+            {
+                // ignored disposed
+            }
         }
     }
 }

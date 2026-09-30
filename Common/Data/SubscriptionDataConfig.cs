@@ -1,4 +1,4 @@
-﻿/*
+/*
  * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
  * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
  *
@@ -16,7 +16,6 @@
 using System;
 using NodaTime;
 using QuantConnect.Util;
-using System.ComponentModel;
 using QuantConnect.Securities;
 using System.Collections.Generic;
 using QuantConnect.Data.Consolidators;
@@ -137,6 +136,12 @@ namespace QuantConnect.Data
             set
             {
                 var oldMappedValue = MappedSymbol;
+                if(ContractDepthOffset == 0 && oldMappedValue == value)
+                {
+                    // Do less if we can.
+                    // We can only do this for sure if 'ContractDepthOffset' is 0 else the value we got might be outdated and will change bellow
+                    return;
+                }
                 var oldSymbol = Symbol;
                 Symbol = Symbol.UpdateMappedSymbol(value, ContractDepthOffset);
 
@@ -217,8 +222,7 @@ namespace QuantConnect.Data
             Resolution = resolution;
             _sid = symbol.ID;
             Symbol = symbol;
-            FillDataForward = fillForward;
-            ExtendedMarketHours = extendedHours;
+            ExtendedMarketHours = extendedHours && LeanData.SupportsExtendedMarketHours(Type);
             PriceScaleFactor = 1;
             IsInternalFeed = isInternalFeed;
             IsCustomData = isCustom;
@@ -233,28 +237,9 @@ namespace QuantConnect.Data
 
             TickType = tickType ?? LeanData.GetCommonTickTypeForCommonDataTypes(objectType, SecurityType);
 
-            switch (resolution)
-            {
-                case Resolution.Tick:
-                    //Ticks are individual sales and fillforward doesn't apply.
-                    Increment = TimeSpan.FromSeconds(0);
-                    FillDataForward = false;
-                    break;
-                case Resolution.Second:
-                    Increment = TimeSpan.FromSeconds(1);
-                    break;
-                case Resolution.Minute:
-                    Increment = TimeSpan.FromMinutes(1);
-                    break;
-                case Resolution.Hour:
-                    Increment = TimeSpan.FromHours(1);
-                    break;
-                case Resolution.Daily:
-                    Increment = TimeSpan.FromDays(1);
-                    break;
-                default:
-                    throw new InvalidEnumArgumentException(Invariant($"Unexpected Resolution: {resolution}"));
-            }
+            Increment = resolution.ToTimeSpan();
+            //Ticks are individual sales and fillforward doesn't apply.
+            FillDataForward = resolution == Resolution.Tick ? false : fillForward;
         }
 
         /// <summary>
@@ -413,9 +398,22 @@ namespace QuantConnect.Data
         /// <filterpriority>2</filterpriority>
         public override string ToString()
         {
-            return Invariant($"{Symbol.Value},#{ContractDepthOffset},{MappedSymbol},{Resolution},{Type.Name},{TickType},{DataNormalizationMode},{DataMappingMode}{(IsInternalFeed ? ",Internal" : string.Empty)}");
+            return ToString(Symbol.Value);
         }
 
+        /// <summary>
+        /// Returns a string that represents the current object.
+        /// </summary>
+        /// <param name="symbol">Symbol to use in the string representation of the object</param>
+        /// <returns>/// A string that represents the current object.</returns>
+        public string ToString(string symbol)
+        {
+            return Invariant($"{symbol},#{ContractDepthOffset},{MappedSymbol},{Resolution},{Type.Name},{TickType},{DataNormalizationMode},{DataMappingMode}{(IsInternalFeed ? ",Internal" : string.Empty)}");
+        }
+
+        /// <summary>
+        /// New base class for all event classes.
+        /// </summary>
         public class NewSymbolEventArgs : EventArgs
         {
             /// <summary>
@@ -428,6 +426,11 @@ namespace QuantConnect.Data
             /// </summary>
             public Symbol New { get; }
 
+            /// <summary>
+            /// Create an instance of NewSymbolEventArgs
+            /// </summary>
+            /// <param name="new"></param>
+            /// <param name="old"></param>
             public NewSymbolEventArgs(Symbol @new, Symbol old)
             {
                 New = @new;

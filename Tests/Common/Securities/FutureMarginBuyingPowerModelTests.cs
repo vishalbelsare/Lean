@@ -209,7 +209,7 @@ namespace QuantConnect.Tests.Common.Securities
             var initialMarginExpected = buyingPowerModel.GetInitialMarginRequirement(futureSecurity, quantity);
 
             Assert.AreEqual(initialMarginExpected
-                            + 18.50m * Math.Sign(quantity), // fees -> 10 quantity * 1.85
+                            + 24.70m * Math.Sign(quantity), // fees -> 10 quantity * 2.47
                 initialMargin);
         }
 
@@ -283,7 +283,7 @@ namespace QuantConnect.Tests.Common.Securities
             // Drop 40% price from $20 to $12
             Update(futureSecurity, 12, algorithm);
 
-            var expected = (12 - 20) * 100 * futureSecurity.SymbolProperties.ContractMultiplier - 1.85m * 100;
+            var expected = (12 - 20) * 100 * futureSecurity.SymbolProperties.ContractMultiplier - 2.47m * 100;
             Assert.AreEqual(futureSecurity.Holdings.UnrealizedProfit, expected);
 
             // we have a massive loss because of futures leverage
@@ -314,7 +314,7 @@ namespace QuantConnect.Tests.Common.Securities
             // Increase from $20 to $40
             Update(futureSecurity, 40, algorithm);
 
-            var expected = (40 - 20) * 100 * futureSecurity.SymbolProperties.ContractMultiplier - 1.85m * 100;
+            var expected = (40 - 20) * 100 * futureSecurity.SymbolProperties.ContractMultiplier - 2.47m * 100;
             Assert.AreEqual(futureSecurity.Holdings.UnrealizedProfit, expected);
 
             // we have a massive win because of futures leverage
@@ -414,7 +414,8 @@ namespace QuantConnect.Tests.Common.Securities
             var model = GetModel(futureSecurity, out _futureMarginModel, algorithm.Portfolio);
 
             // set closed market for simpler math
-            futureSecurity.Exchange.SetLocalDateTimeFrontier(new DateTime(2020, 2, 1));
+            var localTimeKeeper = new LocalTimeKeeper(new DateTime(2020, 2, 1), TimeZones.Utc);
+            futureSecurity.Exchange.SetLocalDateTimeFrontierProvider(localTimeKeeper);
 
             var quantity = algorithm.CalculateOrderQuantity(futureSecurity.Symbol, target);
 
@@ -446,7 +447,8 @@ namespace QuantConnect.Tests.Common.Securities
             var ticker = QuantConnect.Securities.Futures.Financials.EuroDollar;
             var futureSecurity = algorithm.AddFuture(ticker);
             // set closed market for simpler math
-            futureSecurity.Exchange.SetLocalDateTimeFrontier(new DateTime(2020, 2, 1));
+            var localTimeKeeper = new LocalTimeKeeper(new DateTime(2020, 2, 1), TimeZones.Utc);
+            futureSecurity.Exchange.SetLocalDateTimeFrontierProvider(localTimeKeeper);
             Update(futureSecurity, 100, algorithm);
             var model = GetModel(futureSecurity, out _futureMarginModel, algorithm.Portfolio);
 
@@ -478,7 +480,8 @@ namespace QuantConnect.Tests.Common.Securities
             var futureSecurity = algorithm.AddFuture(ticker);
             futureSecurity.BuyingPowerModel = GetModel(futureSecurity, out _futureMarginModel, algorithm.Portfolio);
             // set closed market for simpler math
-            futureSecurity.Exchange.SetLocalDateTimeFrontier(new DateTime(2020, 2, 1));
+            var localTimeKeeper = new LocalTimeKeeper(new DateTime(2020, 2, 1), TimeZones.Utc);
+            futureSecurity.Exchange.SetLocalDateTimeFrontierProvider(localTimeKeeper);
             Update(futureSecurity, 100, algorithm);
             var expectedFinalQuantity = algorithm.CalculateOrderQuantity(futureSecurity.Symbol, target);
 
@@ -516,7 +519,8 @@ namespace QuantConnect.Tests.Common.Securities
             var ticker = QuantConnect.Securities.Futures.Financials.EuroDollar;
             var futureSecurity = algorithm.AddFuture(ticker);
             // set closed market for simpler math
-            futureSecurity.Exchange.SetLocalDateTimeFrontier(new DateTime(2020, 2, 1));
+            var localTimeKeeper = new LocalTimeKeeper(new DateTime(2020, 2, 1), TimeZones.Utc);
+            futureSecurity.Exchange.SetLocalDateTimeFrontierProvider(localTimeKeeper);
             futureSecurity.Holdings.SetHoldings(100, 10 * Math.Sign(target));
             Update(futureSecurity, 100, algorithm);
 
@@ -556,7 +560,8 @@ namespace QuantConnect.Tests.Common.Securities
             var ticker = QuantConnect.Securities.Futures.Financials.EuroDollar;
             var futureSecurity = algorithm.AddFuture(ticker);
             // set closed market for simpler math
-            futureSecurity.Exchange.SetLocalDateTimeFrontier(new DateTime(2020, 2, 1));
+            var localTimeKeeper = new LocalTimeKeeper(new DateTime(2020, 2, 1), TimeZones.Utc);
+            futureSecurity.Exchange.SetLocalDateTimeFrontierProvider(localTimeKeeper);
             futureSecurity.Holdings.SetHoldings(100, 10 * -1 * Math.Sign(target));
             Update(futureSecurity, 100, algorithm);
 
@@ -600,7 +605,8 @@ namespace QuantConnect.Tests.Common.Securities
             Update(futureSecurity, 100, algorithm);
             var model = GetModel(futureSecurity, out _futureMarginModel, algorithm.Portfolio);
             // Close market
-            futureSecurity.Exchange.SetLocalDateTimeFrontier(new DateTime(2020, 2, 1));
+            var localTimeKeeper = new LocalTimeKeeper(new DateTime(2020, 2, 1), TimeZones.Utc);
+            futureSecurity.Exchange.SetLocalDateTimeFrontierProvider(localTimeKeeper);
 
             var quantityClosedMarket = algorithm.CalculateOrderQuantity(futureSecurity.Symbol, target);
             Assert.AreEqual(quantityClosedMarket.DiscretelyRoundBy(lotSize), quantityClosedMarket,
@@ -619,7 +625,7 @@ namespace QuantConnect.Tests.Common.Securities
             var maintenanceOvernight = _futureMarginModel.MaintenanceOvernightMarginRequirement;
 
             // Open market
-            futureSecurity.Exchange.SetLocalDateTimeFrontier(new DateTime(2020, 2, 3));
+            localTimeKeeper.UpdateTime(new DateTime(2020, 2, 3));
 
             var fourtyPercentQuantity = (quantityClosedMarket * 0.4m).DiscretelyRoundBy(lotSize);
             futureSecurity.Holdings.SetHoldings(100, fourtyPercentQuantity);
@@ -645,7 +651,7 @@ namespace QuantConnect.Tests.Common.Securities
             algorithm.Transactions.SetOrderProcessor(orderProcessor);
 
             var ticker = QuantConnect.Securities.Futures.Financials.EuroDollar;
-            var futureSecurity = algorithm.AddFuture(ticker);
+            var futureSecurity = algorithm.AddFuture(ticker, extendedMarketHours: true);
             Update(futureSecurity, 100, algorithm);
             var localTime = new DateTime(2020, 2, 3);
             var utcTime = localTime.ConvertToUtc(futureSecurity.Exchange.TimeZone);
@@ -654,8 +660,10 @@ namespace QuantConnect.Tests.Common.Securities
             // this is important
             _futureMarginModel.EnableIntradayMargins = true;
 
-            // Open market
-            futureSecurity.Exchange.SetLocalDateTimeFrontier(localTime);
+            // Open market at 10am
+            var localTimeKeeper = timeKeeper.GetLocalTimeKeeper(TimeZones.Utc);
+            futureSecurity.Exchange.SetLocalDateTimeFrontierProvider(localTimeKeeper);
+            localTimeKeeper.UpdateTime(localTime.AddHours(10));
 
             var quantity = algorithm.CalculateOrderQuantity(futureSecurity.Symbol, target);
             var request = GetOrderRequest(futureSecurity.Symbol, quantity);
@@ -668,7 +676,7 @@ namespace QuantConnect.Tests.Common.Securities
                     new MarketOrder(futureSecurity.Symbol, quantity, DateTime.UtcNow))).IsSufficient);
 
             // Closing soon market
-            futureSecurity.Exchange.SetLocalDateTimeFrontier(new DateTime(2020, 2, 3, 15,50, 0));
+            localTimeKeeper.UpdateTime(new DateTime(2020, 2, 3, 15,50, 0));
 
             Assert.IsFalse(model.HasSufficientBuyingPowerForOrder(
                 new HasSufficientBuyingPowerForOrderParameters(algorithm.Portfolio,
@@ -678,7 +686,7 @@ namespace QuantConnect.Tests.Common.Securities
             Assert.IsTrue(futureSecurity.Exchange.ClosingSoon);
 
             // Close market
-            futureSecurity.Exchange.SetLocalDateTimeFrontier(new DateTime(2020, 2, 1));
+            localTimeKeeper.UpdateTime(new DateTime(2020, 2, 1));
             Assert.IsFalse(futureSecurity.Exchange.ExchangeOpen);
 
             Assert.IsFalse(model.HasSufficientBuyingPowerForOrder(
@@ -826,6 +834,7 @@ namespace QuantConnect.Tests.Common.Securities
                 { "GNF.csv", 10 },
                 { "HO.csv", 1 },
                 { "ME.csv", 1 },
+                { "MSF.csv", 1 },
                 { "NKN.csv", 2 },
                 { "PL.csv", 1 },
                 { "RB.csv", 1 },

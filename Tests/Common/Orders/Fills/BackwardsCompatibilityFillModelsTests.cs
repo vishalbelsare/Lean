@@ -14,6 +14,7 @@
 */
 
 using System;
+using System.Linq;
 using NUnit.Framework;
 using Python.Runtime;
 using QuantConnect.Data;
@@ -56,6 +57,9 @@ namespace QuantConnect.Tests.Common.Orders.Fills
             var referenceUtc = reference.ConvertToUtc(TimeZones.NewYork);
             var timeKeeper = new TimeKeeper(referenceUtc);
             _security.SetLocalTimeKeeper(timeKeeper.GetLocalTimeKeeper(TimeZones.NewYork));
+            // Seed fresh market data so market fills are not held back as stale (data within one resolution bar
+            // of the current time). These tests exercise the fill model plumbing, not the stale-data handling.
+            _security.SetMarketPrice(new TradeBar(reference.AddMinutes(-1), _security.Symbol, 1m, 1m, 1m, 1m, 1, Time.OneMinute));
         }
 
         #region InheritImmediateFillModel
@@ -68,10 +72,11 @@ namespace QuantConnect.Tests.Common.Orders.Fills
                 new FillModelParameters(_security,
                     new MarketOrder(_security.Symbol, 1, orderDateTime),
                     new MockSubscriptionDataConfigProvider(_config),
-                    Time.OneHour));
+                    Time.OneHour,
+                    null)).Single();
 
             Assert.True(model.MarketFillWasCalled);
-            Assert.AreEqual(OrderStatus.Filled, result.OrderEvent.Status);
+            Assert.AreEqual(OrderStatus.Filled, result.Status);
         }
 
         #endregion
@@ -86,10 +91,11 @@ namespace QuantConnect.Tests.Common.Orders.Fills
                 new FillModelParameters(_security,
                     new MarketOrder(_security.Symbol, 1, orderDateTime),
                     new MockSubscriptionDataConfigProvider(_config),
-                    Time.OneHour));
+                    Time.OneHour,
+                    null)).Single();
 
             Assert.True(model.MarketFillWasCalled);
-            Assert.AreEqual(orderEvent, result.OrderEvent);
+            Assert.AreEqual(orderEvent, result);
         }
 
         [Test]
@@ -100,10 +106,11 @@ namespace QuantConnect.Tests.Common.Orders.Fills
                 new FillModelParameters(_security,
                     new StopMarketOrder(_security.Symbol, 1, 1, orderDateTime),
                     new MockSubscriptionDataConfigProvider(_config),
-                    Time.OneHour));
+                    Time.OneHour,
+                    null)).Single();
 
             Assert.True(model.StopMarketFillWasCalled);
-            Assert.AreEqual(orderEvent, result.OrderEvent);
+            Assert.AreEqual(orderEvent, result);
         }
 
         [Test]
@@ -114,10 +121,11 @@ namespace QuantConnect.Tests.Common.Orders.Fills
                 new FillModelParameters(_security,
                     new StopLimitOrder(_security.Symbol, 1, 1, 1, orderDateTime),
                     new MockSubscriptionDataConfigProvider(_config),
-                    Time.OneHour));
+                    Time.OneHour,
+                    null)).Single();
 
             Assert.True(model.StopLimitFillWasCalled);
-            Assert.AreEqual(orderEvent, result.OrderEvent);
+            Assert.AreEqual(orderEvent, result);
         }
 
         [Test]
@@ -128,10 +136,11 @@ namespace QuantConnect.Tests.Common.Orders.Fills
                 new FillModelParameters(_security,
                     new LimitOrder(_security.Symbol, 1, 1, orderDateTime),
                     new MockSubscriptionDataConfigProvider(_config),
-                    Time.OneHour));
+                    Time.OneHour,
+                    null)).Single();
 
             Assert.True(model.LimitFillWasCalled);
-            Assert.AreEqual(orderEvent, result.OrderEvent);
+            Assert.AreEqual(orderEvent, result);
         }
 
         [Test]
@@ -142,10 +151,11 @@ namespace QuantConnect.Tests.Common.Orders.Fills
                 new FillModelParameters(_security,
                     new MarketOnOpenOrder(_security.Symbol, 1, orderDateTime),
                     new MockSubscriptionDataConfigProvider(_config),
-                    Time.OneHour));
+                    Time.OneHour,
+                    null)).Single();
 
             Assert.True(model.MarketOnOpenFillWasCalled);
-            Assert.AreEqual(orderEvent, result.OrderEvent);
+            Assert.AreEqual(orderEvent, result);
         }
 
         [Test]
@@ -156,10 +166,11 @@ namespace QuantConnect.Tests.Common.Orders.Fills
                 new FillModelParameters(_security,
                     new MarketOnCloseOrder(_security.Symbol, 1, orderDateTime),
                     new MockSubscriptionDataConfigProvider(_config),
-                    Time.OneHour));
+                    Time.OneHour,
+                    null)).Single();
 
             Assert.True(model.MarketOnCloseFillWasCalled);
-            Assert.AreEqual(orderEvent, result.OrderEvent);
+            Assert.AreEqual(orderEvent, result);
         }
 
         #endregion
@@ -174,11 +185,12 @@ namespace QuantConnect.Tests.Common.Orders.Fills
                 new FillModelParameters(_security,
                     new MarketOrder(_security.Symbol, 1, orderDateTime),
                     new MockSubscriptionDataConfigProvider(_config),
-                    Time.OneHour));
+                    Time.OneHour,
+                    null)).Single();
 
             Assert.IsNotNull(result);
             Assert.True(model.GetPricesWasCalled);
-            Assert.AreEqual(12345, result.OrderEvent.FillPrice);
+            Assert.AreEqual(12345, result.FillPrice);
         }
 
         [Test]
@@ -189,12 +201,13 @@ namespace QuantConnect.Tests.Common.Orders.Fills
                 new FillModelParameters(_security,
                     new MarketOrder(_security.Symbol, 1, orderDateTime),
                     new MockSubscriptionDataConfigProvider(_config),
-                    Time.OneHour));
+                    Time.OneHour,
+                    null)).Single();
 
             Assert.True(model.MarketFillWasCalled);
             Assert.IsNotNull(result);
             Assert.True(model.GetPricesWasCalled);
-            Assert.AreEqual(12345, result.OrderEvent.FillPrice);
+            Assert.AreEqual(12345, result.FillPrice);
         }
 
         [Test]
@@ -205,12 +218,13 @@ namespace QuantConnect.Tests.Common.Orders.Fills
                 new FillModelParameters(_security,
                     new StopMarketOrder(_security.Symbol, 1, 1, orderDateTime),
                     new MockSubscriptionDataConfigProvider(_config),
-                    Time.OneHour));
+                    Time.OneHour,
+                    null)).Single();
 
             Assert.True(model.StopMarketFillWasCalled);
             Assert.IsNotNull(result);
             Assert.True(model.GetPricesWasCalled);
-            Assert.AreEqual(12345, result.OrderEvent.FillPrice);
+            Assert.AreEqual(12345, result.FillPrice);
         }
 
         [Test]
@@ -221,12 +235,13 @@ namespace QuantConnect.Tests.Common.Orders.Fills
                 new FillModelParameters(_security,
                     new StopLimitOrder(_security.Symbol, 1, 12344, 12346, orderDateTime),
                     new MockSubscriptionDataConfigProvider(_config),
-                    Time.OneHour));
+                    Time.OneHour,
+                    null)).Single();
 
             Assert.True(model.StopLimitFillWasCalled);
             Assert.IsNotNull(result);
             Assert.True(model.GetPricesWasCalled);
-            Assert.AreEqual(12345, result.OrderEvent.FillPrice);
+            Assert.AreEqual(12345, result.FillPrice);
         }
 
         [Test]
@@ -237,46 +252,70 @@ namespace QuantConnect.Tests.Common.Orders.Fills
                 new FillModelParameters(_security,
                     new LimitOrder(_security.Symbol, 1, 12346, orderDateTime),
                     new MockSubscriptionDataConfigProvider(_config),
-                    Time.OneHour));
+                    Time.OneHour,
+                    null)).Single();
 
             Assert.True(model.LimitFillWasCalled);
             Assert.IsNotNull(result);
             Assert.True(model.GetPricesWasCalled);
-            Assert.AreEqual(12345, result.OrderEvent.FillPrice);
+            Assert.AreEqual(12345, result.FillPrice);
         }
 
-        [Test]
-        public void OldBaseFillModel_MarketOnOpenFill()
+        [TestCase(true)]
+        [TestCase(false)]
+        public void OldBaseFillModel_MarketOnOpenFill(bool isMarketAlwaysOpen)
         {
             var model = new TestFillModelInheritBaseClass();
-            _security.SetMarketPrice(new Tick(orderDateTime, _security.Symbol, 88, 88) {TickType = TickType.Trade});
+            var security = SecurityTests.GetSecurity(isMarketAlwaysOpen);
+            var reference = new DateTime(2022, 4, 5, 10, 0, 0);
+            var referenceUtc = reference.ConvertToUtc(TimeZones.NewYork);
+            var timeKeeper = new TimeKeeper(referenceUtc);
+            security.SetLocalTimeKeeper(timeKeeper.GetLocalTimeKeeper(TimeZones.NewYork));
+            security.SetMarketPrice(new Tick(orderDateTime, security.Symbol, 88, 88) { TickType = TickType.Trade });
 
-            var result = model.Fill(
-                new FillModelParameters(_security,
-                    new MarketOnOpenOrder(_security.Symbol, 1, orderDateTime),
-                    new MockSubscriptionDataConfigProvider(_config),
-                    Time.OneHour));
+            var args = new FillModelParameters(security, new MarketOnOpenOrder(security.Symbol, 1, orderDateTime),
+                new MockSubscriptionDataConfigProvider(_config), Time.OneHour, null);
+            if (isMarketAlwaysOpen)
+            {
+                Assert.Throws<InvalidOperationException>(() => model.Fill(args));
+            }
+            else
+            {
+                var result = model.Fill(args).Single();
 
-            Assert.True(model.MarketOnOpenFillWasCalled);
-            Assert.IsNotNull(result);
-            Assert.True(model.GetPricesWasCalled);
-            Assert.AreEqual(12345, result.OrderEvent.FillPrice);
+                Assert.True(model.MarketOnOpenFillWasCalled);
+                Assert.IsNotNull(result);
+                Assert.True(model.GetPricesWasCalled);
+                Assert.AreEqual(12345, result.FillPrice);
+            }
         }
 
-        [Test]
-        public void OldBaseFillModel_MarketOnCloseFill()
+        [TestCase(true)]
+        [TestCase(false)]
+        public void OldBaseFillModel_MarketOnCloseFill(bool isMarketAlwaysOpen)
         {
             var model = new TestFillModelInheritBaseClass();
-            var result = model.Fill(
-                new FillModelParameters(_security,
-                    new MarketOnCloseOrder(_security.Symbol, 1, orderDateTime),
-                    new MockSubscriptionDataConfigProvider(_config),
-                    Time.OneHour));
+            var security = SecurityTests.GetSecurity(isMarketAlwaysOpen);
+            var reference = new DateTime(2022, 4, 5, 10, 0, 0);
+            var referenceUtc = reference.ConvertToUtc(TimeZones.NewYork);
+            var timeKeeper = new TimeKeeper(referenceUtc);
+            security.SetLocalTimeKeeper(timeKeeper.GetLocalTimeKeeper(TimeZones.NewYork));
 
-            Assert.True(model.MarketOnCloseFillWasCalled);
-            Assert.IsNotNull(result);
-            Assert.True(model.GetPricesWasCalled);
-            Assert.AreEqual(12345, result.OrderEvent.FillPrice);
+            var args = new FillModelParameters(security, new MarketOnCloseOrder(security.Symbol, 1, orderDateTime),
+                new MockSubscriptionDataConfigProvider(_config), Time.OneHour, null);
+            if (isMarketAlwaysOpen)
+            {
+                Assert.Throws<InvalidOperationException>(() => model.Fill(args));
+            }
+            else
+            {
+                var result = model.Fill(args).Single();
+
+                Assert.True(model.MarketOnCloseFillWasCalled);
+                Assert.IsNotNull(result);
+                Assert.True(model.GetPricesWasCalled);
+                Assert.AreEqual(12345, result.FillPrice);
+            }
         }
 
         #endregion
@@ -288,7 +327,7 @@ namespace QuantConnect.Tests.Common.Orders.Fills
         {
             using (Py.GIL())
             {
-                var module = PythonEngine.ModuleFromString(Guid.NewGuid().ToString(),
+                var module = PyModule.FromString(Guid.NewGuid().ToString(),
                     "from AlgorithmImports import *\n" +
                     "class CustomFillModel(ImmediateFillModel):\n" +
                     "   def __init__(self):\n" +
@@ -304,14 +343,15 @@ namespace QuantConnect.Tests.Common.Orders.Fills
                         _security,
                         new MarketOrder(_security.Symbol, 1, orderDateTime),
                         new MockSubscriptionDataConfigProvider(_config),
-                        Time.OneHour
-                    ));
+                        Time.OneHour,
+                        null
+                    )).Single();
 
                 bool called;
                 customFillModel.GetAttr("MarketFillWasCalled").TryConvert(out called);
                 Assert.True(called);
                 Assert.IsNotNull(result);
-                Assert.AreEqual(OrderStatus.Filled, result.OrderEvent.Status);
+                Assert.AreEqual(OrderStatus.Filled, result.Status);
             }
         }
 
@@ -320,7 +360,7 @@ namespace QuantConnect.Tests.Common.Orders.Fills
         {
             using (Py.GIL())
             {
-                var module = PythonEngine.ModuleFromString(Guid.NewGuid().ToString(),
+                var module = PyModule.FromString(Guid.NewGuid().ToString(),
                     "from AlgorithmImports import *\n" +
                     "class CustomFillModel(FillModel):\n" +
                     "   def __init__(self):\n" +
@@ -336,14 +376,15 @@ namespace QuantConnect.Tests.Common.Orders.Fills
                     _security,
                     new MarketOrder(_security.Symbol, 1, orderDateTime),
                     new MockSubscriptionDataConfigProvider(_config),
-                    Time.OneHour
-                ));
+                    Time.OneHour,
+                    null
+                )).Single();
 
                 bool called;
                 customFillModel.GetAttr("MarketFillWasCalled").TryConvert(out called);
                 Assert.True(called);
                 Assert.IsNotNull(result);
-                Assert.AreEqual(OrderStatus.Filled, result.OrderEvent.Status);
+                Assert.AreEqual(OrderStatus.Filled, result.Status);
             }
         }
 
@@ -352,7 +393,7 @@ namespace QuantConnect.Tests.Common.Orders.Fills
         {
             using (Py.GIL())
             {
-                var module = PythonEngine.ModuleFromString(Guid.NewGuid().ToString(),
+                var module = PyModule.FromString(Guid.NewGuid().ToString(),
                     "from AlgorithmImports import *\n" +
                     "class CustomFillModel(FillModel):\n" +
                     "   def __init__(self):\n" +
@@ -368,14 +409,15 @@ namespace QuantConnect.Tests.Common.Orders.Fills
                     _security,
                     new MarketOrder(_security.Symbol, 1, orderDateTime),
                     new MockSubscriptionDataConfigProvider(_config),
-                    Time.OneHour
-                ));
+                    Time.OneHour,
+                    null
+                )).Single();
 
                 bool called;
                 customFillModel.GetAttr("FillWasCalled").TryConvert(out called);
                 Assert.True(called);
                 Assert.IsNotNull(result);
-                Assert.AreEqual(OrderStatus.Filled, result.OrderEvent.Status);
+                Assert.AreEqual(OrderStatus.Filled, result.Status);
             }
         }
 
@@ -384,7 +426,7 @@ namespace QuantConnect.Tests.Common.Orders.Fills
         {
             using (Py.GIL())
             {
-                var module = PythonEngine.ModuleFromString(Guid.NewGuid().ToString(),
+                var module = PyModule.FromString(Guid.NewGuid().ToString(),
                     "from AlgorithmImports import *\n" +
                     "class CustomFillModel(FillModel):\n" +
                     "   def __init__(self):\n" +
@@ -405,8 +447,9 @@ namespace QuantConnect.Tests.Common.Orders.Fills
                     _security,
                     new MarketOrder(_security.Symbol, 1, orderDateTime),
                     new MockSubscriptionDataConfigProvider(_config),
-                    Time.OneHour
-                ));
+                    Time.OneHour,
+                    null
+                )).Single();
 
                 bool called;
                 customFillModel.GetAttr("FillWasCalled").TryConvert(out called);
@@ -414,7 +457,7 @@ namespace QuantConnect.Tests.Common.Orders.Fills
                 customFillModel.GetAttr("MarketFillWasCalled").TryConvert(out called);
                 Assert.True(called);
                 Assert.IsNotNull(result);
-                Assert.AreEqual(OrderStatus.Filled, result.OrderEvent.Status);
+                Assert.AreEqual(OrderStatus.Filled, result.Status);
             }
         }
 
@@ -423,7 +466,7 @@ namespace QuantConnect.Tests.Common.Orders.Fills
         {
             using (Py.GIL())
             {
-                var module = PythonEngine.ModuleFromString(Guid.NewGuid().ToString(),
+                var module = PyModule.FromString(Guid.NewGuid().ToString(),
                     "from AlgorithmImports import *\n" +
                     "class CustomFillModel(FillModel):\n" +
                     "   def __init__(self):\n" +
@@ -444,8 +487,9 @@ namespace QuantConnect.Tests.Common.Orders.Fills
                     _security,
                     new MarketOrder(_security.Symbol, 1, orderDateTime),
                     new MockSubscriptionDataConfigProvider(_config),
-                    Time.OneHour
-                ));
+                    Time.OneHour,
+                    null
+                )).Single();
 
                 bool called;
                 customFillModel.GetAttr("FillWasCalled").TryConvert(out called);
@@ -453,7 +497,7 @@ namespace QuantConnect.Tests.Common.Orders.Fills
                 customFillModel.GetAttr("GetPricesWasCalled").TryConvert(out called);
                 Assert.True(called);
                 Assert.IsNotNull(result);
-                Assert.AreEqual(OrderStatus.Filled, result.OrderEvent.Status);
+                Assert.AreEqual(OrderStatus.Filled, result.Status);
             }
         }
 
@@ -462,7 +506,7 @@ namespace QuantConnect.Tests.Common.Orders.Fills
         {
             using (Py.GIL())
             {
-                var module = PythonEngine.ModuleFromString(Guid.NewGuid().ToString(),
+                var module = PyModule.FromString(Guid.NewGuid().ToString(),
                     "from AlgorithmImports import *\n" +
                     "class CustomFillModel(ImmediateFillModel):\n" +
                     "   def __init__(self):\n" +
@@ -478,14 +522,15 @@ namespace QuantConnect.Tests.Common.Orders.Fills
                     _security,
                     new MarketOrder(_security.Symbol, 1, orderDateTime),
                     new MockSubscriptionDataConfigProvider(_config),
-                    Time.OneHour
-                ));
+                    Time.OneHour,
+                    null
+                )).Single();
 
                 bool called;
                 customFillModel.GetAttr("MarketFillWasCalled").TryConvert(out called);
                 Assert.True(called);
                 Assert.IsNotNull(result);
-                Assert.AreEqual(OrderStatus.Filled, result.OrderEvent.Status);
+                Assert.AreEqual(OrderStatus.Filled, result.Status);
             }
         }
 
@@ -628,7 +673,7 @@ namespace QuantConnect.Tests.Common.Orders.Fills
             protected override Prices GetPrices(Security asset, OrderDirection direction)
             {
                 GetPricesWasCalled = true;
-                return new Prices(orderDateTime, 12345, 12345, 12345, 12345, 12345);
+                return new Prices(orderDateTime, orderDateTime, 12345, 12345, 12345, 12345, 12345);
             }
         }
 
@@ -641,7 +686,7 @@ namespace QuantConnect.Tests.Common.Orders.Fills
                 GetPricesWasCalled = true;
                 // call base.GetPrices() just to test it show its possible
                 base.GetPrices(asset, direction);
-                return new Prices(orderDateTime, 12345, 12345, 12345, 12345, 12345);
+                return new Prices(orderDateTime, orderDateTime, 12345, 12345, 12345, 12345, 12345);
             }
         }
 

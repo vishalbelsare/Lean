@@ -21,7 +21,6 @@ using QuantConnect.Orders.Fees;
 using QuantConnect.Orders.TimeInForces;
 using QuantConnect.Securities;
 using QuantConnect.Util;
-using static QuantConnect.StringExtensions;
 
 
 namespace QuantConnect.Brokerages
@@ -38,7 +37,15 @@ namespace QuantConnect.Brokerages
             typeof(GoodTilDateTimeInForce)
         };
 
-        private const decimal _maxLeverage = 7m;
+        private readonly HashSet<OrderType> _supportedOrderTypes = new HashSet<OrderType>
+        {
+            OrderType.Limit,
+            OrderType.Market,
+            OrderType.StopMarket,
+            OrderType.StopLimit
+        };
+
+        private const decimal _maxLeverage = 5m;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="ZerodhaBrokerageModel"/> class
@@ -68,7 +75,7 @@ namespace QuantConnect.Brokerages
                 return false;
             }
 
-           
+
             // validate time in force
             if (!_supportedTimeInForces.Contains(order.TimeInForce.GetType()))
             {
@@ -91,25 +98,38 @@ namespace QuantConnect.Brokerages
         /// <returns>True if the brokerage could process the order, false otherwise</returns>
         public override bool CanSubmitOrder(Security security, Order order, out BrokerageMessageEvent message)
         {
+            if (!this.ValidateContingentOrdersNotSupported(order, out message))
+            {
+                return false;
+            }
+
             message = null;
 
             // validate security type
             if (security.Type != SecurityType.Equity)
             {
                 message = new BrokerageMessageEvent(BrokerageMessageType.Warning, "NotSupported",
-                    Invariant($"The {nameof(ZerodhaBrokerageModel)} does not support {security.Type} security type.")
-                );
+                    Messages.DefaultBrokerageModel.UnsupportedSecurityType(this, security));
 
                 return false;
             }
 
-           
+
+            // validate order type
+            if (!_supportedOrderTypes.Contains(order.Type))
+            {
+                message = new BrokerageMessageEvent(BrokerageMessageType.Warning, "NotSupported",
+                    Messages.DefaultBrokerageModel.UnsupportedOrderType(this, order, _supportedOrderTypes));
+
+                return false;
+            }
+
+
             // validate time in force
             if (!_supportedTimeInForces.Contains(order.TimeInForce.GetType()))
             {
                 message = new BrokerageMessageEvent(BrokerageMessageType.Warning, "NotSupported",
-                    Invariant($"The {nameof(ZerodhaBrokerageModel)} does not support {order.TimeInForce.GetType().Name} time in force.")
-                );
+                    Messages.DefaultBrokerageModel.UnsupportedTimeInForce(this, order));
 
                 return false;
             }
@@ -136,22 +156,6 @@ namespace QuantConnect.Brokerages
         /// </summary>
         public override IReadOnlyDictionary<SecurityType, string> DefaultMarkets { get; } = GetDefaultMarkets();
 
-
-
-        /// <summary>
-        /// Gets a new buying power model for the security, returning the default model with the security's configured leverage.
-        /// For cash accounts, leverage = 1 is used.
-        /// For margin trading, max leverage = 7
-        /// </summary>
-        /// <param name="security">The security to get a buying power model for</param>
-        /// <returns>The buying power model for this brokerage/security</returns>
-        public override IBuyingPowerModel GetBuyingPowerModel(Security security)
-        {
-            return AccountType == AccountType.Cash
-                ? (IBuyingPowerModel)new CashBuyingPowerModel()
-                : new SecurityMarginModel(_maxLeverage);
-        }
-
         /// <summary>
         /// Zerodha global leverage rule
         /// </summary>
@@ -169,7 +173,7 @@ namespace QuantConnect.Brokerages
                 return _maxLeverage;
             }
 
-            throw new ArgumentException($"Invalid security type: {security.Type}", nameof(security));
+            throw new ArgumentException(Messages.DefaultBrokerageModel.InvalidSecurityTypeForLeverage(security), nameof(security));
         }
 
         /// <summary>

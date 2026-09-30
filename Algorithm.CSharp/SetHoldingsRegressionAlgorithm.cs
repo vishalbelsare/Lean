@@ -15,7 +15,9 @@
 
 using QuantConnect.Data;
 using QuantConnect.Interfaces;
+using QuantConnect.Orders;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace QuantConnect.Algorithm.CSharp
 {
@@ -24,6 +26,8 @@ namespace QuantConnect.Algorithm.CSharp
     /// </summary>
     public class SetHoldingsRegressionAlgorithm : QCAlgorithm, IRegressionAlgorithmDefinition
     {
+        protected virtual bool AsynchronousOrders => false;
+
         /// <summary>
         /// Initialise the data and resolution required, as well as the cash and start-end dates for your algorithm. All algorithms must initialized.
         /// </summary>
@@ -37,15 +41,41 @@ namespace QuantConnect.Algorithm.CSharp
         /// <summary>
         /// OnData event is the primary entry point for your algorithm. Each new data point will be pumped in here.
         /// </summary>
-        /// <param name="data">Slice object keyed by symbol containing the stock data</param>
-        public override void OnData(Slice data)
+        /// <param name="slice">Slice object keyed by symbol containing the stock data</param>
+        public override void OnData(Slice slice)
         {
             if (!Portfolio.Invested)
             {
-                SetHoldings("SPY", 0.1m);
-                SetHoldings("SPY", 0.2d);
-                SetHoldings("SPY", 0.3f);
-                SetHoldings("SPY", 1);
+                SetHoldings("SPY", 0.1m, asynchronous: AsynchronousOrders);
+                SetHoldings("SPY", 0.2d, asynchronous: AsynchronousOrders);
+                SetHoldings("SPY", 0.3f, asynchronous: AsynchronousOrders);
+                SetHoldings("SPY", 1, asynchronous: AsynchronousOrders);
+            }
+        }
+
+        public override void OnEndOfAlgorithm()
+        {
+            var orders = Transactions.GetOrders(x => x.Symbol == QuantConnect.Symbol.Create("SPY", SecurityType.Equity, Market.USA)).ToList();
+
+            if (orders.Count != 4)
+            {
+                throw new RegressionTestException($"Expected 4 orders, found {orders.Count}");
+            }
+
+            foreach (var order in orders)
+            {
+                if (order.Status != OrderStatus.Filled)
+                {
+                    throw new RegressionTestException($"Order {order.Id} was not filled. Status: {order.Status}");
+                }
+            }
+
+            foreach (var ticket in Transactions.GetOrderTickets())
+            {
+                if (ticket.SubmitRequest.Asynchronous != AsynchronousOrders)
+                {
+                    throw new RegressionTestException("Expected all orders to have the same asynchronous flag as the algorithm.");
+                }
             }
         }
 
@@ -57,21 +87,39 @@ namespace QuantConnect.Algorithm.CSharp
         /// <summary>
         /// This is used by the regression test system to indicate which languages this algorithm is written in.
         /// </summary>
-        public Language[] Languages { get; } = { Language.CSharp, Language.Python };
+        public List<Language> Languages { get; } = new() { Language.CSharp, Language.Python };
+
+        /// <summary>
+        /// Data Points count of all timeslices of algorithm
+        /// </summary>
+        public long DataPoints => 1582;
+
+        /// <summary>
+        /// Data Points count of the algorithm history
+        /// </summary>
+        public int AlgorithmHistoryDataPoints => 0;
+
+        /// <summary>
+        /// Final status of the algorithm
+        /// </summary>
+        public AlgorithmStatus AlgorithmStatus => AlgorithmStatus.Completed;
 
         /// <summary>
         /// This is used by the regression test system to indicate what the expected statistics are from running the algorithm
         /// </summary>
         public Dictionary<string, string> ExpectedStatistics => new Dictionary<string, string>
         {
-            {"Total Trades", "4"},
+            {"Total Orders", "4"},
             {"Average Win", "0%"},
             {"Average Loss", "0%"},
             {"Compounding Annual Return", "0%"},
             {"Drawdown", "0%"},
             {"Expectancy", "0"},
+            {"Start Equity", "100000"},
+            {"End Equity", "98822.71"},
             {"Net Profit", "0%"},
             {"Sharpe Ratio", "0"},
+            {"Sortino Ratio", "0"},
             {"Probabilistic Sharpe Ratio", "0%"},
             {"Loss Rate", "0%"},
             {"Win Rate", "0%"},
@@ -86,26 +134,9 @@ namespace QuantConnect.Algorithm.CSharp
             {"Total Fees", "$5.41"},
             {"Estimated Strategy Capacity", "$2800000.00"},
             {"Lowest Capacity Asset", "SPY R735QTJ8XC9X"},
-            {"Fitness Score", "0.995"},
-            {"Kelly Criterion Estimate", "0"},
-            {"Kelly Criterion Probability Value", "0"},
-            {"Sortino Ratio", "79228162514264337593543950335"},
-            {"Return Over Maximum Drawdown", "79228162514264337593543950335"},
-            {"Portfolio Turnover", "0.995"},
-            {"Total Insights Generated", "0"},
-            {"Total Insights Closed", "0"},
-            {"Total Insights Analysis Completed", "0"},
-            {"Long Insight Count", "0"},
-            {"Short Insight Count", "0"},
-            {"Long/Short Ratio", "100%"},
-            {"Estimated Monthly Alpha Value", "$0"},
-            {"Total Accumulated Estimated Alpha Value", "$0"},
-            {"Mean Population Estimated Insight Value", "$0"},
-            {"Mean Population Direction", "0%"},
-            {"Mean Population Magnitude", "0%"},
-            {"Rolling Averaged Population Direction", "0%"},
-            {"Rolling Averaged Population Magnitude", "0%"},
-            {"OrderListHash", "211aa90fef127ec5652eff1b3d2b8ca8"}
+            {"Portfolio Turnover", "49.82%"},
+            {"Drawdown Recovery", "0"},
+            {"OrderListHash", "23bf9784138d7f8f43acb295647943cc"}
         };
     }
 }

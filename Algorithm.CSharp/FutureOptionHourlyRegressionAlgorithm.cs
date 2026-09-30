@@ -14,13 +14,8 @@
 */
 
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Reflection;
 using QuantConnect.Data;
-using QuantConnect.Interfaces;
-using QuantConnect.Orders;
-using QuantConnect.Securities;
+using System.Collections.Generic;
 
 namespace QuantConnect.Algorithm.CSharp
 {
@@ -30,17 +25,20 @@ namespace QuantConnect.Algorithm.CSharp
     public class FutureOptionHourlyRegressionAlgorithm : FutureOptionDailyRegressionAlgorithm
     {
         protected override Resolution Resolution => Resolution.Hour;
+        // Hourly data fills within the day, so the original same-day buy/liquidate range is kept
+        protected override DateTime StartDate => new DateTime(2020, 1, 7);
+        protected override DateTime EndDate => new DateTime(2020, 1, 8);
 
         protected override void ScheduleBuySell()
         {
             // Schedule a purchase of this contract at Noon
             Schedule.On(DateRules.Today, TimeRules.Noon, () =>
             {
-                Ticket = MarketOrder(DcOption, 1);
+                Ticket = MarketOrder(ESOption, 1);
             });
-            
-            // Schedule liquidation at 6PM
-            Schedule.On(DateRules.Today, TimeRules.At(18,0,0), () =>
+
+            // Schedule liquidation at 2PM when the market is open
+            Schedule.On(DateRules.Today, TimeRules.At(17,0,0), () =>
             {
                 Liquidate();
             });
@@ -63,21 +61,39 @@ namespace QuantConnect.Algorithm.CSharp
         /// <summary>
         /// This is used by the regression test system to indicate which languages this algorithm is written in.
         /// </summary>
-        public override Language[] Languages { get; } = { Language.CSharp, Language.Python };
+        public override List<Language> Languages { get; } = new() { Language.CSharp, Language.Python };
+
+        /// <summary>
+        /// Data Points count of all timeslices of algorithm
+        /// </summary>
+        public override long DataPoints => 55;
+
+        /// <summary>
+        /// Data Points count of the algorithm history
+        /// </summary>
+        public override int AlgorithmHistoryDataPoints => 1;
+
+        /// <summary>
+        /// Final status of the algorithm
+        /// </summary>
+        public AlgorithmStatus AlgorithmStatus => AlgorithmStatus.Completed;
 
         /// <summary>
         /// This is used by the regression test system to indicate what the expected statistics are from running the algorithm
         /// </summary>
         public override Dictionary<string, string> ExpectedStatistics => new Dictionary<string, string>
         {
-            {"Total Trades", "2"},
+            {"Total Orders", "2"},
             {"Average Win", "0%"},
             {"Average Loss", "0%"},
             {"Compounding Annual Return", "0%"},
             {"Drawdown", "0%"},
             {"Expectancy", "0"},
+            {"Start Equity", "100000"},
+            {"End Equity", "99672.16"},
             {"Net Profit", "0%"},
             {"Sharpe Ratio", "0"},
+            {"Sortino Ratio", "0"},
             {"Probabilistic Sharpe Ratio", "0%"},
             {"Loss Rate", "0%"},
             {"Win Rate", "0%"},
@@ -89,29 +105,12 @@ namespace QuantConnect.Algorithm.CSharp
             {"Information Ratio", "0"},
             {"Tracking Error", "0"},
             {"Treynor Ratio", "0"},
-            {"Total Fees", "$3.70"},
-            {"Estimated Strategy Capacity", "$0"},
-            {"Lowest Capacity Asset", "DC V5E8P9VAH3IC|DC V5E8P9SH0U0X"},
-            {"Fitness Score", "0.01"},
-            {"Kelly Criterion Estimate", "0"},
-            {"Kelly Criterion Probability Value", "0"},
-            {"Sortino Ratio", "79228162514264337593543950335"},
-            {"Return Over Maximum Drawdown", "-101.911"},
-            {"Portfolio Turnover", "0.02"},
-            {"Total Insights Generated", "0"},
-            {"Total Insights Closed", "0"},
-            {"Total Insights Analysis Completed", "0"},
-            {"Long Insight Count", "0"},
-            {"Short Insight Count", "0"},
-            {"Long/Short Ratio", "100%"},
-            {"Estimated Monthly Alpha Value", "$0"},
-            {"Total Accumulated Estimated Alpha Value", "$0"},
-            {"Mean Population Estimated Insight Value", "$0"},
-            {"Mean Population Direction", "0%"},
-            {"Mean Population Magnitude", "0%"},
-            {"Rolling Averaged Population Direction", "0%"},
-            {"Rolling Averaged Population Magnitude", "0%"},
-            {"OrderListHash", "665d06e4f758724b5b9576b14fd18743"}
+            {"Total Fees", "$2.84"},
+            {"Estimated Strategy Capacity", "$3000.00"},
+            {"Lowest Capacity Asset", "ES XCZJLCEYO5XG|ES XCZJLC9NOB29"},
+            {"Portfolio Turnover", "4.90%"},
+            {"Drawdown Recovery", "0"},
+            {"OrderListHash", "10661c6d84f71ca7e07e2fdf5b79851b"}
         };
     }
 }

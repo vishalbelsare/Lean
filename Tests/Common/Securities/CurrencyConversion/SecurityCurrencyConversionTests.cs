@@ -22,6 +22,7 @@ using QuantConnect.Data.Market;
 using QuantConnect.Securities;
 using QuantConnect.Securities.CurrencyConversion;
 using QuantConnect.Tests.Engine.DataFeeds;
+using QuantConnect.Util;
 
 namespace QuantConnect.Tests.Common.Securities.CurrencyConversion
 {
@@ -34,7 +35,7 @@ namespace QuantConnect.Tests.Common.Securities.CurrencyConversion
             var existingSecurities = new List<Security>(0);
             var potentialSymbols = new List<Symbol> { Symbols.EURUSD };
 
-            var subscriptions = new SubscriptionManager();
+            var subscriptions = new SubscriptionManager(NullTimeKeeper.Instance);
             var dataManager = new DataManagerStub();
             subscriptions.SetDataManager(dataManager);
 
@@ -65,7 +66,7 @@ namespace QuantConnect.Tests.Common.Securities.CurrencyConversion
             var existingSecurities = new List<Security>(0);
             var potentialSymbols = new List<Symbol> { Symbols.BTCUSD, Symbols.EURUSD };
 
-            var subscriptions = new SubscriptionManager();
+            var subscriptions = new SubscriptionManager(NullTimeKeeper.Instance);
             var dataManager = new DataManagerStub();
             subscriptions.SetDataManager(dataManager);
 
@@ -92,12 +93,40 @@ namespace QuantConnect.Tests.Common.Securities.CurrencyConversion
         }
 
         [Test]
+        public void ConversionRateSecuritiesAreMemoizedExposingCount()
+        {
+            var currencyConversion = SecurityCurrencyConversion.LinearSearch(
+                "BTC",
+                "EUR",
+                new List<Security>(0),
+                new List<Symbol> { Symbols.BTCUSD, Symbols.EURUSD },
+                CreateSecurity);
+
+            var securities = currencyConversion.ConversionRateSecurities;
+
+            // memoized so it exposes a Count property, which also enables len() in Python through Python.NET
+            Assert.IsInstanceOf<MemoizingEnumerable<Security>>(securities);
+            Assert.AreEqual(2, ((MemoizingEnumerable<Security>)securities).Count);
+        }
+
+        [Test]
+        public void ConstantConversionRateSecuritiesAreMemoizedExposingCount()
+        {
+            var currencyConversion = new ConstantCurrencyConversion("EUR", "USD", 1.2m);
+
+            var securities = currencyConversion.ConversionRateSecurities;
+
+            Assert.IsInstanceOf<MemoizingEnumerable<Security>>(securities);
+            Assert.AreEqual(0, ((MemoizingEnumerable<Security>)securities).Count);
+        }
+
+        [Test]
         public void LinearSearchPrefersExistingSecuritiesOverNewOnesOneLeg()
         {
             var existingSecurities = new List<Security> { CreateSecurity(Symbols.EURUSD) };
             var potentialSymbols = new List<Symbol> { Symbols.EURUSD };
 
-            var subscriptions = new SubscriptionManager();
+            var subscriptions = new SubscriptionManager(NullTimeKeeper.Instance);
             var dataManager = new DataManagerStub();
             subscriptions.SetDataManager(dataManager);
 
@@ -128,7 +157,7 @@ namespace QuantConnect.Tests.Common.Securities.CurrencyConversion
             var existingSecurities = new List<Security> { CreateSecurity(Symbols.BTCUSD) };
             var potentialSymbols = new List<Symbol> { Symbols.BTCUSD, Symbols.EURUSD };
 
-            var subscriptions = new SubscriptionManager();
+            var subscriptions = new SubscriptionManager(NullTimeKeeper.Instance);
             var dataManager = new DataManagerStub();
             subscriptions.SetDataManager(dataManager);
 
@@ -186,7 +215,8 @@ namespace QuantConnect.Tests.Common.Securities.CurrencyConversion
 
             existingSecurities[0].SetMarketPrice(new Tick { Value = 10m });
 
-            Assert.AreEqual(expectedRate, currencyConversion.Update());
+            currencyConversion.Update();
+            Assert.AreEqual(expectedRate, currencyConversion.ConversionRate);
         }
 
         [TestCaseSource(nameof(twoLegCases))]
@@ -213,7 +243,8 @@ namespace QuantConnect.Tests.Common.Securities.CurrencyConversion
             existingSecurities[0].SetMarketPrice(new Tick { Value = 15m });
             existingSecurities[1].SetMarketPrice(new Tick { Value = 25m });
 
-            Assert.AreEqual(expectedRate, currencyConversion.Update());
+            currencyConversion.Update();
+            Assert.AreEqual(expectedRate, currencyConversion.ConversionRate);
         }
 
         [Test]
@@ -228,7 +259,8 @@ namespace QuantConnect.Tests.Common.Securities.CurrencyConversion
                 new List<Symbol>(0),
                 CreateSecurity);
 
-            Assert.AreEqual(0m, currencyConversion.Update());
+            currencyConversion.Update();
+            Assert.AreEqual(0m, currencyConversion.ConversionRate);
         }
 
         [Test]
@@ -249,7 +281,8 @@ namespace QuantConnect.Tests.Common.Securities.CurrencyConversion
 
             existingSecurities[0].SetMarketPrice(new Tick { Value = 15m });
 
-            Assert.AreEqual(0m, currencyConversion.Update());
+            currencyConversion.Update();
+            Assert.AreEqual(0m, currencyConversion.ConversionRate);
         }
 
         [Test]

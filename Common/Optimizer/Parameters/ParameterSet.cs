@@ -1,4 +1,4 @@
-﻿/*
+/*
  * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
  * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
  *
@@ -14,10 +14,10 @@
 */
 
 using System.Linq;
-using QuantConnect.Util;
-using System.Collections.Generic;
 using Newtonsoft.Json;
 using QuantConnect.Api;
+using QuantConnect.Util;
+using System.Collections.Generic;
 
 namespace QuantConnect.Optimizer.Parameters
 {
@@ -46,10 +46,10 @@ namespace QuantConnect.Optimizer.Parameters
         /// </summary>
         /// <param name="id">Unique identifier</param>
         /// <param name="value">Combination of optimization parameters</param>
-        public ParameterSet(int id, Dictionary<string, string> value)
+        public ParameterSet(int id, IReadOnlyDictionary<string, string> value)
         {
             Id = id;
-            Value = value?.ToReadOnlyDictionary();
+            Value = value;
         }
 
         /// <summary>
@@ -57,7 +57,7 @@ namespace QuantConnect.Optimizer.Parameters
         /// </summary>
         public override string ToString()
         {
-            return string.Join(",", Value.Select(arg => $"{arg.Key}:{arg.Value}"));
+            return string.Join(',', Value.OrderBy(kvp => kvp.Key).Select(arg => $"{arg.Key}:{arg.Value}"));
         }
     }
 }

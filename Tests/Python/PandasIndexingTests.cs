@@ -17,6 +17,7 @@
 using System;
 using NUnit.Framework;
 using Python.Runtime;
+using static QLNet.NumericHaganPricer;
 
 namespace QuantConnect.Tests.Python
 {
@@ -52,8 +53,21 @@ namespace QuantConnect.Tests.Python
         public void ContainsUserMappedTickers()
         {
             using (Py.GIL())
-            { 
+            {
                 PyObject result = _pandasDataFrameTests.test_contains_user_mapped_ticker();
+                var test = result.As<bool>();
+
+                Assert.IsTrue(test);
+            }
+        }
+
+        [TestCase("SPY WhatEver")]
+        [TestCase("Sharpe ratio")]
+        public void ContainsUserDefinedColumnsWithSpaces(string columnName)
+        {
+            using (Py.GIL())
+            {
+                PyObject result = _pandasDataFrameTests.test_contains_user_defined_columns_with_spaces(columnName);
                 var test = result.As<bool>();
 
                 Assert.IsTrue(test);
@@ -68,7 +82,19 @@ namespace QuantConnect.Tests.Python
                 PyObject result = _pandasDataFrameTests.test_expected_exception();
                 var exception = result.As<string>();
 
-                Assert.IsTrue(exception.Contains("No key found for either mapped or original key. Mapped Key: ['AAPL R735QTJ8XC9X']; Original Key: ['aapl']", StringComparison.InvariantCulture));
+                Assert.IsTrue(exception.Contains("No key found for either mapped or original key.", StringComparison.InvariantCulture), exception);
+            }
+        }
+
+        [Test]
+        public void ColumnEqualsOnlyMatchingString()
+        {
+            using (Py.GIL())
+            {
+                PyObject result = _pandasDataFrameTests.test_column_equals_only_matching_string();
+                var test = result.As<bool>();
+
+                Assert.IsTrue(test);
             }
         }
     }

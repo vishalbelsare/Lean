@@ -52,26 +52,31 @@ namespace QuantConnect.Lean.Engine.TransactionHandlers
                 throw new ArgumentException("Brokerage must be of type BacktestingBrokerage for use wth the BacktestingTransactionHandler");
             }
 
-            _brokerage = (BacktestingBrokerage) brokerage;
+            _brokerage = (BacktestingBrokerage)brokerage;
             _algorithm = algorithm;
 
             base.Initialize(algorithm, brokerage, resultHandler);
-
-            // non blocking implementation
-            _orderRequestQueue = new BusyCollection<OrderRequest>();
         }
+
+        /// <summary>
+        /// For backtesting order requests are processed synchronously by the algorithm thread, only live
+        /// deployments with a concurrency enabled brokerage use background transaction threads
+        /// </summary>
+        protected override bool SynchronousProcessing => !(ConcurrencyEnabled && _algorithm.LiveMode);
 
         /// <summary>
         /// Processes all synchronous events that must take place before the next time loop for the algorithm
         /// </summary>
         public override void ProcessSynchronousEvents()
         {
-            // we process pending order requests our selves
-            Run();
+            if (SynchronousProcessing)
+            {
+                // we process pending order requests our selves
+                ProcessPendingRequests();
+            }
 
             base.ProcessSynchronousEvents();
 
-            _brokerage.SimulateMarket();
             _brokerage.Scan();
 
             // Run our delistings processing, only do this once a slice
@@ -89,7 +94,6 @@ namespace QuantConnect.Lean.Engine.TransactionHandlers
         {
             base.ProcessAsynchronousEvents();
 
-            _brokerage.SimulateMarket();
             _brokerage.Scan();
         }
 
@@ -99,8 +103,15 @@ namespace QuantConnect.Lean.Engine.TransactionHandlers
         /// <param name="ticket">The <see cref="OrderTicket"/> expecting to be submitted</param>
         protected override void WaitForOrderSubmission(OrderTicket ticket)
         {
+            if (!SynchronousProcessing)
+            {
+                // let the base class handle this
+                base.WaitForOrderSubmission(ticket);
+                return;
+            }
+
             // we submit the order request our selves
-            Run();
+            ProcessPendingRequests();
 
             if (!ticket.OrderSet.WaitOne(0))
             {
@@ -110,15 +121,6 @@ namespace QuantConnect.Lean.Engine.TransactionHandlers
                     $"The order request (Id={ticket.OrderId}) was not submitted. " +
                     "See the OrderRequest.Response for more information");
             }
-        }
-
-        /// <summary>
-        /// For backtesting order requests will be processed by the algorithm thread
-        /// sequentially at <see cref="WaitForOrderSubmission"/> and <see cref="ProcessSynchronousEvents"/>
-        /// </summary>
-        protected override void InitializeTransactionThread()
-        {
-            // nop
         }
     }
 }

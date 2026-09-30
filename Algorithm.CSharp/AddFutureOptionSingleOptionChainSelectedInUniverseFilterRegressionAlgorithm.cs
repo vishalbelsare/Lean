@@ -43,7 +43,7 @@ namespace QuantConnect.Algorithm.CSharp
         public override void Initialize()
         {
             SetStartDate(2020, 1, 4);
-            SetEndDate(2020, 1, 6);
+            SetEndDate(2020, 1, 8);
 
             _es = AddFuture(Futures.Indices.SP500EMini, Resolution.Minute, Market.CME);
             _es.SetFilter((futureFilter) =>
@@ -55,10 +55,10 @@ namespace QuantConnect.Algorithm.CSharp
             {
                 _optionFilterRan = true;
 
-                var expiry = new HashSet<DateTime>(optionContracts.Select(x => x.Underlying.ID.Date)).SingleOrDefault();
-                // Cast to IEnumerable<Symbol> because OptionFilterContract overrides some LINQ operators like `Select` and `Where`
+                var expiry = new HashSet<DateTime>(optionContracts.Select(x => x.Symbol.Underlying.ID.Date)).SingleOrDefault();
+                // Cast to List<Symbol> because OptionFilterContract overrides some LINQ operators like `Select` and `Where`
                 // and cause it to mutate the underlying Symbol collection when using those operators.
-                var symbol = new HashSet<Symbol>(((IEnumerable<Symbol>)optionContracts).Select(x => x.Underlying)).SingleOrDefault();
+                var symbol = new HashSet<Symbol>(((List<Symbol>)optionContracts).Select(x => x.Underlying)).SingleOrDefault();
 
                 if (expiry == null || symbol == null)
                 {
@@ -75,9 +75,9 @@ namespace QuantConnect.Algorithm.CSharp
             });
         }
 
-        public override void OnData(Slice data)
+        public override void OnData(Slice slice)
         {
-            if (!data.HasData)
+            if (!slice.HasData)
             {
                 return;
             }
@@ -85,7 +85,7 @@ namespace QuantConnect.Algorithm.CSharp
             _onDataReached = true;
 
             var hasOptionQuoteBars = false;
-            foreach (var qb in data.QuoteBars.Values)
+            foreach (var qb in slice.QuoteBars.Values)
             {
                 if (qb.Symbol.SecurityType != SecurityType.FutureOption)
                 {
@@ -108,7 +108,7 @@ namespace QuantConnect.Algorithm.CSharp
                 return;
             }
 
-            foreach (var chain in data.OptionChains.Values)
+            foreach (var chain in slice.OptionChains.Values.OrderBy(x => x.Symbol.Underlying.ID.Date))
             {
                 var futureInvested = false;
                 var optionInvested = false;
@@ -122,7 +122,7 @@ namespace QuantConnect.Algorithm.CSharp
 
                     var future = option.Underlying;
 
-                    if (!optionInvested && data.ContainsKey(option))
+                    if (!optionInvested && slice.ContainsKey(option))
                     {
                         var optionContract = Securities[option];
                         var marginModel = optionContract.BuyingPowerModel as FuturesOptionsMarginModel;
@@ -131,16 +131,16 @@ namespace QuantConnect.Algorithm.CSharp
                             || marginModel.MaintenanceIntradayMarginRequirement == 0
                             || marginModel.MaintenanceOvernightMarginRequirement == 0)
                         {
-                            throw new Exception("Unexpected margin requirements");
+                            throw new RegressionTestException("Unexpected margin requirements");
                         }
 
                         if (marginModel.GetInitialMarginRequirement(optionContract, 1) == 0)
                         {
-                            throw new Exception("Unexpected Initial Margin requirement");
+                            throw new RegressionTestException("Unexpected Initial Margin requirement");
                         }
                         if (marginModel.GetMaintenanceMargin(optionContract) != 0)
                         {
-                            throw new Exception("Unexpected Maintenance Margin requirement");
+                            throw new RegressionTestException("Unexpected Maintenance Margin requirement");
                         }
 
                         MarketOrder(option, 1);
@@ -149,10 +149,10 @@ namespace QuantConnect.Algorithm.CSharp
 
                         if (marginModel.GetMaintenanceMargin(optionContract) == 0)
                         {
-                            throw new Exception("Unexpected Maintenance Margin requirement");
+                            throw new RegressionTestException("Unexpected Maintenance Margin requirement");
                         }
                     }
-                    if (!futureInvested && data.ContainsKey(future))
+                    if (!futureInvested && slice.ContainsKey(future))
                     {
                         MarketOrder(future, 1);
                         _invested = true;
@@ -164,15 +164,13 @@ namespace QuantConnect.Algorithm.CSharp
 
         public override void OnEndOfAlgorithm()
         {
-            base.OnEndOfAlgorithm();
-
             if (!_optionFilterRan)
             {
                 throw new InvalidOperationException("Option chain filter was never ran");
             }
             if (!_onDataReached)
             {
-                throw new Exception("OnData() was never called.");
+                throw new RegressionTestException("OnData() was never called.");
             }
             if (_symbolsReceived.Count != _expectedSymbolsReceived.Count)
             {
@@ -190,7 +188,7 @@ namespace QuantConnect.Algorithm.CSharp
 
             if (missingSymbols.Count > 0)
             {
-                throw new Exception($"Symbols: \"{string.Join(", ", missingSymbols)}\" were not found in OnData");
+                throw new RegressionTestException($"Symbols: \"{string.Join(", ", missingSymbols)}\" were not found in OnData");
             }
 
             foreach (var expectedSymbol in _expectedSymbolsReceived)
@@ -204,7 +202,7 @@ namespace QuantConnect.Algorithm.CSharp
 
                 if (nonDupeDataCount < 1000)
                 {
-                    throw new Exception($"Received too few data points. Expected >=1000, found {nonDupeDataCount} for {expectedSymbol}");
+                    throw new RegressionTestException($"Received too few data points. Expected >=1000, found {nonDupeDataCount} for {expectedSymbol}");
                 }
             }
         }
@@ -217,55 +215,56 @@ namespace QuantConnect.Algorithm.CSharp
         /// <summary>
         /// This is used by the regression test system to indicate which languages this algorithm is written in.
         /// </summary>
-        public Language[] Languages { get; } = { Language.CSharp, Language.Python };
+        public List<Language> Languages { get; } = new() { Language.CSharp, Language.Python };
+
+        /// <summary>
+        /// Data Points count of all timeslices of algorithm
+        /// </summary>
+        public long DataPoints => 319494;
+
+        /// <summary>
+        /// Data Points count of the algorithm history
+        /// </summary>
+        public int AlgorithmHistoryDataPoints => 0;
+
+        /// <summary>
+        /// Final status of the algorithm
+        /// </summary>
+        public AlgorithmStatus AlgorithmStatus => AlgorithmStatus.Completed;
 
         /// <summary>
         /// This is used by the regression test system to indicate what the expected statistics are from running the algorithm
         /// </summary>
         public Dictionary<string, string> ExpectedStatistics => new Dictionary<string, string>
         {
-            {"Total Trades", "2"},
+            {"Total Orders", "2"},
             {"Average Win", "0%"},
             {"Average Loss", "0%"},
-            {"Compounding Annual Return", "-10.708%"},
-            {"Drawdown", "0.200%"},
+            {"Compounding Annual Return", "430.834%"},
+            {"Drawdown", "4.200%"},
             {"Expectancy", "0"},
-            {"Net Profit", "-0.093%"},
-            {"Sharpe Ratio", "-10.594"},
-            {"Probabilistic Sharpe Ratio", "0%"},
+            {"Start Equity", "100000"},
+            {"End Equity", "102313.03"},
+            {"Net Profit", "2.313%"},
+            {"Sharpe Ratio", "17.721"},
+            {"Sortino Ratio", "0"},
+            {"Probabilistic Sharpe Ratio", "95.297%"},
             {"Loss Rate", "0%"},
             {"Win Rate", "0%"},
             {"Profit-Loss Ratio", "0"},
-            {"Alpha", "-0.261"},
-            {"Beta", "0.244"},
-            {"Annual Standard Deviation", "0.01"},
-            {"Annual Variance", "0"},
-            {"Information Ratio", "-22.456"},
-            {"Tracking Error", "0.032"},
-            {"Treynor Ratio", "-0.454"},
-            {"Total Fees", "$3.70"},
-            {"Estimated Strategy Capacity", "$41000.00"},
-            {"Lowest Capacity Asset", "ES 31C3JQTOYO9T0|ES XCZJLC9NOB29"},
-            {"Fitness Score", "0.273"},
-            {"Kelly Criterion Estimate", "0"},
-            {"Kelly Criterion Probability Value", "0"},
-            {"Sortino Ratio", "79228162514264337593543950335"},
-            {"Return Over Maximum Drawdown", "-123.159"},
-            {"Portfolio Turnover", "0.547"},
-            {"Total Insights Generated", "0"},
-            {"Total Insights Closed", "0"},
-            {"Total Insights Analysis Completed", "0"},
-            {"Long Insight Count", "0"},
-            {"Short Insight Count", "0"},
-            {"Long/Short Ratio", "100%"},
-            {"Estimated Monthly Alpha Value", "$0"},
-            {"Total Accumulated Estimated Alpha Value", "$0"},
-            {"Mean Population Estimated Insight Value", "$0"},
-            {"Mean Population Direction", "0%"},
-            {"Mean Population Magnitude", "0%"},
-            {"Rolling Averaged Population Direction", "0%"},
-            {"Rolling Averaged Population Magnitude", "0%"},
-            {"OrderListHash", "9347e3b610cfa21f7cbd968a0135c8af"}
+            {"Alpha", "2.663"},
+            {"Beta", "1.264"},
+            {"Annual Standard Deviation", "0.184"},
+            {"Annual Variance", "0.034"},
+            {"Information Ratio", "16.514"},
+            {"Tracking Error", "0.169"},
+            {"Treynor Ratio", "2.574"},
+            {"Total Fees", "$3.57"},
+            {"Estimated Strategy Capacity", "$28000000.00"},
+            {"Lowest Capacity Asset", "ES XCZJLCA62LNO|ES XCZJLC9NOB29"},
+            {"Portfolio Turnover", "33.84%"},
+            {"Drawdown Recovery", "0"},
+            {"OrderListHash", "7c82013ecabca41591e0253a477025dd"}
         };
     }
 }

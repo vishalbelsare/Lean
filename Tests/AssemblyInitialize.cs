@@ -23,6 +23,7 @@ using QuantConnect.Configuration;
 using QuantConnect.Data;
 using QuantConnect.Data.Custom.IconicTypes;
 using QuantConnect.Data.Market;
+using QuantConnect.Lean.Engine;
 using QuantConnect.Logging;
 using QuantConnect.Python;
 using QuantConnect.Tests;
@@ -34,6 +35,8 @@ namespace QuantConnect.Tests
     [SetUpFixture]
     public class AssemblyInitialize
     {
+        private static bool _initialized;
+
         [OneTimeSetUp]
         public void InitializeTestEnvironment()
         {
@@ -44,12 +47,24 @@ namespace QuantConnect.Tests
 
         public static void AdjustCurrentDirectory()
         {
+            if (_initialized)
+            {
+                return;
+            }
+            _initialized = true;
+
             // nunit 3 sets the current folder to a temp folder we need it to be the test bin output folder
             var dir = TestContext.CurrentContext.TestDirectory;
             Environment.CurrentDirectory = dir;
             Directory.SetCurrentDirectory(dir);
             Config.Reset();
             Globals.Reset();
+
+            Log.DebuggingEnabled = Config.GetBool("debug-mode");
+            // Activate virtual environment if defined
+            PythonInitializer.ActivatePythonVirtualEnvironment(Config.Get("python-venv"));
+
+            // Initialize and add our Paths
             PythonInitializer.Initialize();
             PythonInitializer.AddPythonPaths(
                 new[]
@@ -100,8 +115,8 @@ namespace QuantConnect.Tests
         /// <summary>
         /// Replace the log handler if it has been changed
         /// </summary>
-        /// <param name="details"></param>
-        public void BeforeTest(ITest details)
+        /// <param name="test"></param>
+        public void BeforeTest(ITest test)
         {
             if (Log.LogHandler != LogHandler)
             {
@@ -109,7 +124,7 @@ namespace QuantConnect.Tests
             }
         }
 
-        public void AfterTest(ITest details)
+        public void AfterTest(ITest test)
         {
             //NOP
         }

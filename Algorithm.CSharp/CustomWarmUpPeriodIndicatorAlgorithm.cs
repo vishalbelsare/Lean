@@ -28,8 +28,10 @@ namespace QuantConnect.Algorithm.CSharp
     /// </summary>
     public class CustomWarmUpPeriodIndicatorAlgorithm : QCAlgorithm, IRegressionAlgorithmDefinition
     {
-        private CustomSMA _customNotWarmUp;
+        private CSMANotWarmUp _customNotWarmUp;
         private CSMAWithWarmUp _customWarmUp;
+        private SimpleMovingAverage _customNotInherit;
+        private SimpleMovingAverage _duplicateSMA;
 
         public override void Initialize()
         {
@@ -38,12 +40,18 @@ namespace QuantConnect.Algorithm.CSharp
             AddEquity("SPY", Resolution.Second);
 
             // Create two custom indicators, where one of them defines WarmUpPeriod parameter
-            _customNotWarmUp = new CustomSMA("_customNotWarmUp", 60);
+            _customNotWarmUp = new CSMANotWarmUp("_customNotWarmUp", 60);
             _customWarmUp = new CSMAWithWarmUp("_customWarmUp", 60);
+            _customNotInherit = new SimpleMovingAverage("_customNotInherit", 60);
+            // using 2nd SMA to match counterpart python algorithm ( CustomSMA + csharpIndicator )
+            // so that AlgorithmHistoryDataPoints are the same in both
+            _duplicateSMA = new SimpleMovingAverage("_duplicateSMA", 60);
 
             // Register the daily data of "SPY" to automatically update both indicators
             RegisterIndicator("SPY", _customWarmUp, Resolution.Minute);
             RegisterIndicator("SPY", _customNotWarmUp, Resolution.Minute);
+            RegisterIndicator("SPY", _customNotInherit, Resolution.Minute);
+            RegisterIndicator("SPY", _duplicateSMA, Resolution.Minute);
 
             // Warm up _customWarmUp indicator
             WarmUpIndicator("SPY", _customWarmUp, Resolution.Minute);
@@ -51,11 +59,11 @@ namespace QuantConnect.Algorithm.CSharp
             // Check _customWarmUp indicator has already been warmed up with the requested data
             if (!_customWarmUp.IsReady)
             {
-                throw new Exception("_customWarmUp indicator was expected to be ready");
+                throw new RegressionTestException("_customWarmUp indicator was expected to be ready");
             }
             if (_customWarmUp.Samples != 60)
             {
-                throw new Exception("_customWarmUp indicator was expected to have processed 60 datapoints already");
+                throw new RegressionTestException("_customWarmUp indicator was expected to have processed 60 datapoints already");
             }
 
             // Try to warm up _customNotWarmUp indicator. It's expected from LEAN to skip the warm up process
@@ -65,11 +73,33 @@ namespace QuantConnect.Algorithm.CSharp
             // Check _customNotWarmUp indicator is not ready, because the warm up process was skipped
             if (_customNotWarmUp.IsReady)
             {
-                throw new Exception("_customNotWarmUp indicator wasn't expected to be warmed up");
+                throw new RegressionTestException("_customNotWarmUp indicator wasn't expected to be warmed up");
+            }
+
+            WarmUpIndicator("SPY", _customNotInherit, Resolution.Minute);
+            // Check _customWarmUp indicator has already been warmed up with the requested data
+            if (!_customNotInherit.IsReady)
+            {
+                throw new RegressionTestException("_customNotInherit indicator was expected to be ready");
+            }
+            if (_customNotInherit.Samples != 60)
+            {
+                throw new RegressionTestException("_customNotInherit indicator was expected to have processed 60 datapoints already");
+            }
+
+            WarmUpIndicator("SPY", _duplicateSMA, Resolution.Minute);
+            // Check _customWarmUp indicator has already been warmed up with the requested data
+            if (!_duplicateSMA.IsReady)
+            {
+                throw new RegressionTestException("_duplicateSMA indicator was expected to be ready");
+            }
+            if (_duplicateSMA.Samples != 60)
+            {
+                throw new RegressionTestException("_duplicateSMA indicator was expected to have processed 60 datapoints already");
             }
         }
 
-        public void OnData(TradeBars data)
+        public override void OnData(Slice slice)
         {
             if (!Portfolio.Invested)
             {
@@ -80,17 +110,22 @@ namespace QuantConnect.Algorithm.CSharp
             {
                 // Compute the difference between the indicators values
                 var diff = Math.Abs(_customNotWarmUp.Current.Value - _customWarmUp.Current.Value);
+                diff += Math.Abs(_customNotInherit.Current.Value - _customNotWarmUp.Current.Value);
+                diff += Math.Abs(_customNotInherit.Current.Value - _customWarmUp.Current.Value);
+                diff += Math.Abs(_duplicateSMA.Current.Value - _customWarmUp.Current.Value);
+                diff += Math.Abs(_duplicateSMA.Current.Value - _customNotWarmUp.Current.Value);
+                diff += Math.Abs(_duplicateSMA.Current.Value - _customNotInherit.Current.Value);
 
                 // Check _customNotWarmUp indicator is ready when the number of samples is bigger than its period
                 if (_customNotWarmUp.IsReady != (_customNotWarmUp.Samples >= 60))
                 {
-                    throw new Exception("_customNotWarmUp indicator was expected to be ready when the number of samples were bigger that its WarmUpPeriod parameter");
+                    throw new RegressionTestException("_customNotWarmUp indicator was expected to be ready when the number of samples were bigger that its WarmUpPeriod parameter");
                 }
 
                 // Check their values are the same when both are ready
                 if (diff > 1e-10m && _customNotWarmUp.IsReady && _customWarmUp.IsReady) 
                 {
-                    throw new Exception($"The values of the indicators are not the same. The difference is {diff}");
+                    throw new RegressionTestException($"The values of the indicators are not the same. The difference is {diff}");
                 }
             }
         }
@@ -99,11 +134,11 @@ namespace QuantConnect.Algorithm.CSharp
         /// Custom implementation of SimpleMovingAverage.
         /// Represents the traditional simple moving average indicator (SMA) without WarmUpPeriod parameter defined
         /// </summary>
-        private class CustomSMA : IndicatorBase<IBaseData>
+        private class CSMANotWarmUp : IndicatorBase<IBaseData>
         {
             private Queue<IBaseData> _queue;
             private int _period;
-            public CustomSMA(string name, int period)
+            public CSMANotWarmUp(string name, int period)
                 : base(name)
             {
                 _queue = new Queue<IBaseData>();
@@ -130,7 +165,7 @@ namespace QuantConnect.Algorithm.CSharp
         /// Custom implementation of SimpleMovingAverage.
         /// Represents the traditional simple moving average indicator (SMA) with WarmUpPeriod defined
         /// </summary>
-        private class CSMAWithWarmUp : CustomSMA, IIndicatorWarmUpPeriodProvider
+        private class CSMAWithWarmUp : CSMANotWarmUp, IIndicatorWarmUpPeriodProvider
         {
             public CSMAWithWarmUp(string name, int period)
                 : base(name, period)
@@ -148,22 +183,40 @@ namespace QuantConnect.Algorithm.CSharp
         /// <summary>
         /// This is used by the regression test system to indicate which languages this algorithm is written in.
         /// </summary>
-        public Language[] Languages { get; } = { Language.CSharp, Language.Python };
+        public List<Language> Languages { get; } = new() { Language.CSharp, Language.Python };
+
+        /// <summary>
+        /// Data Points count of all timeslices of algorithm
+        /// </summary>
+        public long DataPoints => 234043;
+
+        /// <summary>
+        /// Data Points count of the algorithm history
+        /// </summary>
+        public int AlgorithmHistoryDataPoints => 360;
+
+        /// <summary>
+        /// Final status of the algorithm
+        /// </summary>
+        public AlgorithmStatus AlgorithmStatus => AlgorithmStatus.Completed;
 
         /// <summary>
         /// This is used by the regression test system to indicate what the expected statistics are from running the algorithm
         /// </summary>
         public Dictionary<string, string> ExpectedStatistics => new Dictionary<string, string>
         {
-            {"Total Trades", "1"},
+            {"Total Orders", "1"},
             {"Average Win", "0%"},
             {"Average Loss", "0%"},
             {"Compounding Annual Return", "272.157%"},
             {"Drawdown", "2.200%"},
             {"Expectancy", "0"},
+            {"Start Equity", "100000"},
+            {"End Equity", "101694.38"},
             {"Net Profit", "1.694%"},
-            {"Sharpe Ratio", "8.897"},
-            {"Probabilistic Sharpe Ratio", "67.609%"},
+            {"Sharpe Ratio", "8.863"},
+            {"Sortino Ratio", "0"},
+            {"Probabilistic Sharpe Ratio", "67.460%"},
             {"Loss Rate", "0%"},
             {"Win Rate", "0%"},
             {"Profit-Loss Ratio", "0"},
@@ -173,30 +226,13 @@ namespace QuantConnect.Algorithm.CSharp
             {"Annual Variance", "0.049"},
             {"Information Ratio", "-14.534"},
             {"Tracking Error", "0.001"},
-            {"Treynor Ratio", "1.98"},
+            {"Treynor Ratio", "1.972"},
             {"Total Fees", "$3.45"},
             {"Estimated Strategy Capacity", "$310000000.00"},
             {"Lowest Capacity Asset", "SPY R735QTJ8XC9X"},
-            {"Fitness Score", "0.246"},
-            {"Kelly Criterion Estimate", "0"},
-            {"Kelly Criterion Probability Value", "0"},
-            {"Sortino Ratio", "9.761"},
-            {"Return Over Maximum Drawdown", "107.509"},
-            {"Portfolio Turnover", "0.249"},
-            {"Total Insights Generated", "0"},
-            {"Total Insights Closed", "0"},
-            {"Total Insights Analysis Completed", "0"},
-            {"Long Insight Count", "0"},
-            {"Short Insight Count", "0"},
-            {"Long/Short Ratio", "100%"},
-            {"Estimated Monthly Alpha Value", "$0"},
-            {"Total Accumulated Estimated Alpha Value", "$0"},
-            {"Mean Population Estimated Insight Value", "$0"},
-            {"Mean Population Direction", "0%"},
-            {"Mean Population Magnitude", "0%"},
-            {"Rolling Averaged Population Direction", "0%"},
-            {"Rolling Averaged Population Magnitude", "0%"},
-            {"OrderListHash", "e10039d74166b161f3ea2851a5e85843"}
+            {"Portfolio Turnover", "19.96%"},
+            {"Drawdown Recovery", "2"},
+            {"OrderListHash", "8c925e7c6c10ff1da3a40669accba91a"}
         };
     }
 }

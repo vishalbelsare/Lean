@@ -39,6 +39,7 @@ namespace QuantConnect.Tests.Common.Brokerages
                 return new Crypto(
                     SecurityExchangeHours.AlwaysOpen(TimeZones.NewYork),
                     new Cash(Currencies.USD, 0, 1m),
+                    new Cash("ETH", 0, 0),
                     new SubscriptionDataConfig(
                         typeof(TradeBar),
                         Symbol,
@@ -161,6 +162,7 @@ namespace QuantConnect.Tests.Common.Brokerages
             return new Crypto(
                 SecurityExchangeHours.AlwaysOpen(TimeZones.NewYork),
                 new Cash(Currencies.USD, 0, 1m),
+                new Cash(symbol.Value.RemoveFromEnd(Currencies.USD), 0, 0),
                 new SubscriptionDataConfig(
                     typeof(TradeBar),
                     symbol,
@@ -178,15 +180,38 @@ namespace QuantConnect.Tests.Common.Brokerages
         }
 
         [TestCase(0.01, true)]
-        [TestCase(0.00005, false)]
+        [TestCase(0.00003, false)]
         public void CanSubmitOrder_WhenQuantityIsLargeEnough(decimal orderQuantity, bool isValidOrderQuantity)
         {
             BrokerageMessageEvent message;
             var order = new Mock<Order>();
+            order.Setup(x => x.Quantity).Returns(orderQuantity);
 
-            order.Object.Quantity = orderQuantity;
+            Assert.AreEqual(isValidOrderQuantity, _bitfinexBrokerageModel.CanSubmitOrder(TestsHelpers.GetSecurity(market: Market.Bitfinex), order.Object, out message));
+        }
 
-            Assert.AreEqual(isValidOrderQuantity, _bitfinexBrokerageModel.CanSubmitOrder(TestsHelpers.GetSecurity(), order.Object, out message));
+        [TestCase(OrderType.Limit, true)]
+        [TestCase(OrderType.Market, true)]
+        [TestCase(OrderType.StopMarket, true)]
+        [TestCase(OrderType.StopLimit, true)]
+        [TestCase(OrderType.LimitIfTouched, false)]
+        [TestCase(OrderType.MarketOnOpen, false)]
+        [TestCase(OrderType.MarketOnClose, false)]
+        [TestCase(OrderType.OptionExercise, false)]
+        [TestCase(OrderType.ComboMarket, false)]
+        [TestCase(OrderType.ComboLimit, false)]
+        [TestCase(OrderType.ComboLegLimit, false)]
+        [TestCase(OrderType.TrailingStop, false)]
+        public void CanSubmitOrderValidatesSupportedAndUnsupportedOrderTypes(OrderType orderType, bool isSupported)
+        {
+            var security = TestsHelpers.GetSecurity(market: Market.Bitfinex);
+            var order = new Mock<Order>();
+            order.Setup(o => o.Type).Returns(orderType);
+            order.Setup(o => o.Quantity).Returns(0.01m);
+            var result = _bitfinexBrokerageModel.CanSubmitOrder(security, order.Object, out var message);
+
+            // Verify correct handling of each order type
+            Assert.AreEqual(isSupported, result);
         }
     }
 }

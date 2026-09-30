@@ -1,4 +1,4 @@
-﻿/*
+/*
  * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
  * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
  *
@@ -17,6 +17,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Python.Runtime;
+using QuantConnect.Util;
 
 namespace QuantConnect.Data.UniverseSelection
 {
@@ -27,16 +28,7 @@ namespace QuantConnect.Data.UniverseSelection
     public class FuncUniverse<T> : Universe
         where T : BaseData
     {
-        private readonly UniverseSettings _universeSettings;
         private readonly Func<IEnumerable<T>, IEnumerable<Symbol>> _universeSelector;
-
-        /// <summary>
-        /// Gets the settings used for subscriptons added for this universe
-        /// </summary>
-        public override UniverseSettings UniverseSettings
-        {
-            get { return _universeSettings; }
-        }
 
         /// <summary>
         /// Initializes a new instance of the <see cref="FuncUniverse{T}"/> class
@@ -48,7 +40,8 @@ namespace QuantConnect.Data.UniverseSelection
             : base(configuration)
         {
             _universeSelector = universeSelector;
-            _universeSettings = universeSettings;
+            _universeSelector ??= (dataPoints) => dataPoints.Select(x => x.Symbol);
+            UniverseSettings = universeSettings;
         }
 
         /// <summary>
@@ -70,7 +63,7 @@ namespace QuantConnect.Data.UniverseSelection
         /// <returns>The data that passes the filter</returns>
         public override IEnumerable<Symbol> SelectSymbols(DateTime utcTime, BaseDataCollection data)
         {
-            return _universeSelector(data.Data.Cast<T>());
+            return _universeSelector(new CastingEnumerable<BaseData, T>(data.Data));
         }
     }
     

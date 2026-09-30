@@ -29,6 +29,8 @@ namespace QuantConnect.Util
         private static readonly Lazy<SymbolPropertiesDatabase> SymbolPropertiesDatabase =
             new Lazy<SymbolPropertiesDatabase>(Securities.SymbolPropertiesDatabase.FromDataFolder);
 
+        private static readonly int[][] PotentialStableCoins = { [1, 3], [1, 2], [0, 3], [0, 2] };
+
         /// <summary>
         /// Tries to decomposes the specified currency pair into a base and quote currency provided as out parameters
         /// </summary>
@@ -98,6 +100,16 @@ namespace QuantConnect.Util
         /// </summary>
         /// <param name="currencyPair">The pair to check for</param>
         /// <returns>True if the pair can be decomposed into base and quote currencies, false if not</returns>
+        public static bool IsForexDecomposable(string currencyPair)
+        {
+            return !string.IsNullOrEmpty(currencyPair) && currencyPair.Length == 6;
+        }
+
+        /// <summary>
+        /// Checks whether a symbol is decomposable into a base and a quote currency
+        /// </summary>
+        /// <param name="currencyPair">The pair to check for</param>
+        /// <returns>True if the pair can be decomposed into base and quote currencies, false if not</returns>
         public static bool IsDecomposable(Symbol currencyPair)
         {
             if (currencyPair == null)
@@ -110,7 +122,7 @@ namespace QuantConnect.Util
                 return currencyPair.Value.Length == 6;
             }
 
-            if (currencyPair.SecurityType == SecurityType.Cfd || currencyPair.SecurityType == SecurityType.Crypto)
+            if (currencyPair.SecurityType == SecurityType.Cfd || currencyPair.SecurityType == SecurityType.Crypto || currencyPair.SecurityType == SecurityType.CryptoFuture)
             {
                 var symbolProperties = SymbolPropertiesDatabase.Value.GetSymbolProperties(
                     currencyPair.ID.Market,
@@ -192,12 +204,38 @@ namespace QuantConnect.Util
         /// <returns>The <see cref="Match"/> member that represents the relation between the two pairs</returns>
         public static Match ComparePair(this Symbol pairA, string baseCurrencyB, string quoteCurrencyB)
         {
-            if (pairA.Value == baseCurrencyB + quoteCurrencyB)
+            if (!TryDecomposeCurrencyPair(pairA, out var baseCurrencyA, out var quoteCurrencyA))
+            {
+                return Match.NoMatch;
+            }
+
+            // Check for a stablecoin between the currencies
+            var currencies = new string[] { baseCurrencyA, quoteCurrencyA, baseCurrencyB, quoteCurrencyB };
+            var isThereAnyMatch = false;
+
+            // Compute all the potential stablecoins
+            foreach (var pair in PotentialStableCoins)
+            {
+                if (Currencies.IsStableCoinWithoutPair(currencies[pair[0]] + currencies[pair[1]], pairA.ID.Market)
+                    || Currencies.IsStableCoinWithoutPair(currencies[pair[1]] + currencies[pair[0]], pairA.ID.Market))
+                {
+                    // If there's a stablecoin between them, assign to currency in pair A the value
+                    // of the currency in pair B 
+                    currencies[pair[0]] = currencies[pair[1]];
+                    isThereAnyMatch = true;
+                }
+            }
+
+            string pairAValue = isThereAnyMatch ? string.Concat(currencies[0], "||", currencies[1]) : string.Concat(baseCurrencyA, "||", quoteCurrencyA);
+
+            var directPair = string.Concat(baseCurrencyB, "||", quoteCurrencyB);
+            if (pairAValue == directPair)
             {
                 return Match.ExactMatch;
             }
 
-            if (pairA.Value == quoteCurrencyB + baseCurrencyB)
+            var inversePair = string.Concat(quoteCurrencyB, "||", baseCurrencyB);
+            if (pairAValue == inversePair)
             {
                 return Match.InverseMatch;
             }
@@ -205,7 +243,7 @@ namespace QuantConnect.Util
             return Match.NoMatch;
         }
 
-        private static bool IsValidSecurityType(SecurityType? securityType, bool throwException)
+        public static bool IsValidSecurityType(SecurityType? securityType, bool throwException)
         {
             if (securityType == null)
             {
@@ -218,7 +256,8 @@ namespace QuantConnect.Util
 
             if (securityType != SecurityType.Forex &&
                 securityType != SecurityType.Cfd &&
-                securityType != SecurityType.Crypto)
+                securityType != SecurityType.Crypto &&
+                securityType != SecurityType.CryptoFuture)
             {
                 if (throwException)
                 {

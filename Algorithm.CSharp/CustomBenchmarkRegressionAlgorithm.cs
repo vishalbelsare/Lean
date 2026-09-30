@@ -45,7 +45,7 @@ namespace QuantConnect.Algorithm.CSharp
         /// OnData event is the primary entry point for your algorithm. Each new data point will be pumped in here.
         /// </summary>
         /// <param name="data">Slice object keyed by symbol containing the stock data</param>
-        public override void OnData(Slice data)
+        public override void OnData(Slice slice)
         {
             if (!Portfolio.Invested)
             {
@@ -69,22 +69,40 @@ namespace QuantConnect.Algorithm.CSharp
         /// <summary>
         /// This is used by the regression test system to indicate which languages this algorithm is written in.
         /// </summary>
-        public Language[] Languages { get; } = { Language.CSharp };
+        public List<Language> Languages { get; } = new() { Language.CSharp };
+
+        /// <summary>
+        /// Data Points count of all timeslices of algorithm
+        /// </summary>
+        public long DataPoints => 1965;
+
+        /// <summary>
+        /// Data Points count of the algorithm history
+        /// </summary>
+        public int AlgorithmHistoryDataPoints => 0;
+
+        /// <summary>
+        /// Final status of the algorithm
+        /// </summary>
+        public AlgorithmStatus AlgorithmStatus => AlgorithmStatus.Completed;
 
         /// <summary>
         /// This is used by the regression test system to indicate what the expected statistics are from running the algorithm
         /// </summary>
         public Dictionary<string, string> ExpectedStatistics => new Dictionary<string, string>
         {
-            {"Total Trades", "1"},
+            {"Total Orders", "1"},
             {"Average Win", "0%"},
             {"Average Loss", "0%"},
             {"Compounding Annual Return", "34.768%"},
             {"Drawdown", "2.300%"},
             {"Expectancy", "0"},
+            {"Start Equity", "100000"},
+            {"End Equity", "100382.23"},
             {"Net Profit", "0.382%"},
-            {"Sharpe Ratio", "5.488"},
-            {"Probabilistic Sharpe Ratio", "60.047%"},
+            {"Sharpe Ratio", "5.446"},
+            {"Sortino Ratio", "0"},
+            {"Probabilistic Sharpe Ratio", "59.920%"},
             {"Loss Rate", "0%"},
             {"Win Rate", "0%"},
             {"Profit-Loss Ratio", "0"},
@@ -94,30 +112,13 @@ namespace QuantConnect.Algorithm.CSharp
             {"Annual Variance", "0.032"},
             {"Information Ratio", "-7.724"},
             {"Tracking Error", "0"},
-            {"Treynor Ratio", "0.986"},
+            {"Treynor Ratio", "0.978"},
             {"Total Fees", "$32.11"},
             {"Estimated Strategy Capacity", "$66000000.00"},
             {"Lowest Capacity Asset", "AAPL R735QTJ8XC9X"},
-            {"Fitness Score", "0.029"},
-            {"Kelly Criterion Estimate", "0"},
-            {"Kelly Criterion Probability Value", "0"},
-            {"Sortino Ratio", "-2.336"},
-            {"Return Over Maximum Drawdown", "-8.991"},
-            {"Portfolio Turnover", "0.251"},
-            {"Total Insights Generated", "0"},
-            {"Total Insights Closed", "0"},
-            {"Total Insights Analysis Completed", "0"},
-            {"Long Insight Count", "0"},
-            {"Short Insight Count", "0"},
-            {"Long/Short Ratio", "100%"},
-            {"Estimated Monthly Alpha Value", "$0"},
-            {"Total Accumulated Estimated Alpha Value", "$0"},
-            {"Mean Population Estimated Insight Value", "$0"},
-            {"Mean Population Direction", "0%"},
-            {"Mean Population Magnitude", "0%"},
-            {"Rolling Averaged Population Direction", "0%"},
-            {"Rolling Averaged Population Magnitude", "0%"},
-            {"OrderListHash", "b7b8e83e4456e143c2c4c11fa31a1cf2"}
+            {"Portfolio Turnover", "20.08%"},
+            {"Drawdown Recovery", "2"},
+            {"OrderListHash", "fa51af977e55213dc007a38a3d681b62"}
         };
     }
 }

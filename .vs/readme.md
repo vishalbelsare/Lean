@@ -12,16 +12,16 @@ This document contains information regarding ways to use Visual Studio to work w
 
 <h2>Option 1: Lean CLI</h2>
 
-To use Lean CLI follow the instructions for installation and tutorial for usage in our [documentation](https://www.quantconnect.com/docs/v2/lean-cli/getting-started/lean-cli).
+To use Lean CLI follow the instructions for installation and tutorial for usage in our [documentation](https://www.quantconnect.com/docs/v2/lean-cli/key-concepts/getting-started).
 
 <br />
 
 <h2>Option 2: Install Locally</h2>
 
-1. Install [.Net 5](https://dotnet.microsoft.com/download) for the project
+1. Install [.Net 9](https://dotnet.microsoft.com/en-us/download/dotnet/9.0) for the project
 
-2. (Optional) Get [Python 3.6.8](https://www.python.org/downloads/release/python-368/) for running Python algorithms
-    - Follow Python instructions [here](https://github.com/QuantConnect/Lean/tree/master/Algorithm.Python#installing-python-36) for your platform
+2. (Optional) Get [Python 3.11.11](https://www.python.org/downloads/release/python-31111/) for running Python algorithms
+    - Follow Python instructions [here](https://github.com/QuantConnect/Lean/tree/master/Algorithm.Python#installing-python-311) for your platform
 
 3. Get [Visual Studio](https://visualstudio.microsoft.com/vs/)
 
@@ -35,7 +35,7 @@ Your environment is prepared and ready to run lean
 
 <h1>How to use Lean</h1>
 
-This section will cover configuring, launching and debugging lean. This is only applicable to option 2 from above. This does not apply to Lean CLI, please refer to [CLI documentation](https://www.quantconnect.com/docs/v2/lean-cli/getting-started/lean-cli)
+This section will cover configuring, launching and debugging lean. This is only applicable to option 2 from above. This does not apply to Lean CLI, please refer to [CLI documentation](https://www.quantconnect.com/docs/v2/lean-cli/key-concepts/getting-started)
 
 <br />
 

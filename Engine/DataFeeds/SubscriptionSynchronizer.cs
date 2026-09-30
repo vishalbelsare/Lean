@@ -1,4 +1,4 @@
-﻿/*
+/*
  * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
  * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
  *
@@ -15,10 +15,11 @@
 */
 
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
+using QuantConnect.Util;
 using QuantConnect.Data.Market;
+using System.Collections.Generic;
 using QuantConnect.Data.UniverseSelection;
 
 namespace QuantConnect.Lean.Engine.DataFeeds
@@ -32,6 +33,7 @@ namespace QuantConnect.Lean.Engine.DataFeeds
         private TimeSliceFactory _timeSliceFactory;
         private ITimeProvider _timeProvider;
         private ManualTimeProvider _frontierTimeProvider;
+        private PerformanceTrackingTool _perfTrackingTool;
 
         /// <summary>
         /// Event fired when a <see cref="Subscription"/> is finished
@@ -44,9 +46,10 @@ namespace QuantConnect.Lean.Engine.DataFeeds
         /// <param name="universeSelection">The universe selection instance used to handle universe
         /// selection subscription output</param>
         /// <returns>A time slice for the specified frontier time</returns>
-        public SubscriptionSynchronizer(UniverseSelection universeSelection)
+        public SubscriptionSynchronizer(UniverseSelection universeSelection, PerformanceTrackingTool performanceTrackingTool)
         {
             _universeSelection = universeSelection;
+            _perfTrackingTool = performanceTrackingTool;
         }
 
         /// <summary>
@@ -102,6 +105,7 @@ namespace QuantConnect.Lean.Engine.DataFeeds
                 do
                 {
                     newChanges = SecurityChanges.None;
+                    _perfTrackingTool.Start(PerformanceTarget.Subscriptions);
                     foreach (var subscription in subscriptions)
                     {
                         if (subscription.EndOfStream)
@@ -142,9 +146,16 @@ namespace QuantConnect.Lean.Engine.DataFeeds
                             // universes (e.g. for ETF constituent universes, since the ETF itself is used to create
                             // the universe Symbol (and set as its underlying), once the ETF is delisted, the
                             // universe should cease to exist, since there are no more constituents of that ETF).
-                            if (subscription.IsUniverseSelectionSubscription && subscription.Current.Data is Delisting)
+                            if (subscription.Current.Data.DataType == MarketDataType.Auxiliary && subscription.Current.Data is Delisting delisting)
                             {
-                                subscription.Universes.Single().Dispose();
+                                if(subscription.IsUniverseSelectionSubscription)
+                                {
+                                    subscription.Universes.Single().Dispose();
+                                }
+                                else if(delisting.Type == DelistingType.Delisted)
+                                {
+                                    changes += _universeSelection.HandleDelisting(subscription.Current.Data, subscription.Configuration.IsInternalFeed);
+                                }
                             }
 
                             packet.Add(subscription.Current.Data);
@@ -180,20 +191,7 @@ namespace QuantConnect.Lean.Engine.DataFeeds
                                 }
                                 else
                                 {
-                                    if (packetBaseDataCollection is OptionChainUniverseDataCollection)
-                                    {
-                                        var current = packetBaseDataCollection as OptionChainUniverseDataCollection;
-                                        collection = new OptionChainUniverseDataCollection(frontierUtc, subscription.Configuration.Symbol, packetData, current?.Underlying);
-                                    }
-                                    else if (packetBaseDataCollection is FuturesChainUniverseDataCollection)
-                                    {
-                                        collection = new FuturesChainUniverseDataCollection(frontierUtc, subscription.Configuration.Symbol, packetData);
-                                    }
-                                    else
-                                    {
-                                        collection = new BaseDataCollection(frontierUtc, frontierUtc, subscription.Configuration.Symbol, packetData);
-                                    }
-
+                                    collection = new BaseDataCollection(frontierUtc, frontierUtc, subscription.Configuration.Symbol, packetData, packetBaseDataCollection?.Underlying, packetBaseDataCollection?.FilteredContracts);
                                     if (universeData == null)
                                     {
                                         universeData = new Dictionary<Universe, BaseDataCollection>();
@@ -222,6 +220,7 @@ namespace QuantConnect.Lean.Engine.DataFeeds
                             OnSubscriptionFinished(subscription);
                         }
                     }
+                    _perfTrackingTool.Stop(PerformanceTarget.Subscriptions);
 
                     if (universeData != null && universeData.Count > 0)
                     {
@@ -229,12 +228,16 @@ namespace QuantConnect.Lean.Engine.DataFeeds
                         // time pulse to align algorithm time with current frontier
                         yield return _timeSliceFactory.CreateTimePulse(frontierUtc);
 
-                        foreach (var kvp in universeData)
+                        // trigger the smalled resolution first, so that FF res get's set once from the start correctly
+                        // while at it, let's make it determininstic and sort by universe sid later
+                        foreach (var kvp in universeData.OrderBy(x => x.Key.Configuration.Resolution).ThenBy(x => x.Key.Symbol.ID))
                         {
                             var universe = kvp.Key;
                             var baseDataCollection = kvp.Value;
                             universeDataForTimeSliceCreate[universe] = baseDataCollection;
+                            _perfTrackingTool.Start(PerformanceTarget.Selection);
                             newChanges += _universeSelection.ApplyUniverseSelection(universe, frontierUtc, baseDataCollection);
+                            _perfTrackingTool.Stop(PerformanceTarget.Selection);
                         }
                         universeData.Clear();
                     }
@@ -243,8 +246,9 @@ namespace QuantConnect.Lean.Engine.DataFeeds
                 }
                 while (newChanges != SecurityChanges.None
                     || _universeSelection.AddPendingInternalDataFeeds(frontierUtc));
-
+                _perfTrackingTool.Start(PerformanceTarget.Slice);
                 var timeSlice = _timeSliceFactory.Create(frontierUtc, data, changes, universeDataForTimeSliceCreate);
+                _perfTrackingTool.Stop(PerformanceTarget.Slice);
 
                 while (delayedSubscriptionFinished.Count > 0)
                 {
@@ -276,3 +280,4 @@ namespace QuantConnect.Lean.Engine.DataFeeds
         }
     }
 }
+

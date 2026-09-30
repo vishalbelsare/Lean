@@ -31,7 +31,6 @@ namespace QuantConnect.Algorithm.CSharp
     /// </summary>
     public class AddFutureContractWithContinuousRegressionAlgorithm : QCAlgorithm, IRegressionAlgorithmDefinition
     {
-        private Symbol _currentMappedSymbol;
         private Future _continuousContract;
         private Future _futureContract;
         private bool _ended;
@@ -50,26 +49,26 @@ namespace QuantConnect.Algorithm.CSharp
                 contractDepthOffset: 0
             );
 
-            _futureContract = AddFutureContract(FutureChainProvider.GetFutureContractList(_continuousContract.Symbol, Time).First());
+            _futureContract = AddFutureContract(FuturesChain(_continuousContract.Symbol).First());
         }
 
         /// <summary>
         /// OnData event is the primary entry point for your algorithm. Each new data point will be pumped in here.
         /// </summary>
-        /// <param name="data">Slice object keyed by symbol containing the stock data</param>
-        public override void OnData(Slice data)
+        /// <param name="slice">Slice object keyed by symbol containing the stock data</param>
+        public override void OnData(Slice slice)
         {
             if (_ended)
             {
-                throw new Exception($"Algorithm should of ended!");
+                throw new RegressionTestException($"Algorithm should of ended!");
             }
-            if (data.Keys.Count > 2)
+            if (slice.Keys.Count > 2)
             {
-                throw new Exception($"Getting data for more than 2 symbols! {string.Join(",", data.Keys.Select(symbol => symbol))}");
+                throw new RegressionTestException($"Getting data for more than 2 symbols! {string.Join(",", slice.Keys.Select(symbol => symbol))}");
             }
             if (UniverseManager.Count != 3)
             {
-                throw new Exception($"Expecting 3 universes (chain, continuous and user defined) but have {UniverseManager.Count}");
+                throw new RegressionTestException($"Expecting 3 universes (chain, continuous and user defined) but have {UniverseManager.Count}");
             }
 
             if (!Portfolio.Invested)
@@ -99,7 +98,7 @@ namespace QuantConnect.Algorithm.CSharp
             if (changes.AddedSecurities.Any(security => security.Symbol != _continuousContract.Symbol && security.Symbol != _futureContract.Symbol)
                 || changes.RemovedSecurities.Any(security => security.Symbol != _continuousContract.Symbol && security.Symbol != _futureContract.Symbol))
             {
-                throw new Exception($"We got an unexpected security changes {changes}");
+                throw new RegressionTestException($"We got an unexpected security changes {changes}");
             }
         }
 
@@ -111,55 +110,56 @@ namespace QuantConnect.Algorithm.CSharp
         /// <summary>
         /// This is used by the regression test system to indicate which languages this algorithm is written in.
         /// </summary>
-        public Language[] Languages { get; } = { Language.CSharp };
+        public List<Language> Languages { get; } = new() { Language.CSharp };
+
+        /// <summary>
+        /// Data Points count of all timeslices of algorithm
+        /// </summary>
+        public long DataPoints => 61;
+
+        /// <summary>
+        /// Data Points count of the algorithm history
+        /// </summary>
+        public int AlgorithmHistoryDataPoints => 1;
+
+        /// <summary>
+        /// Final status of the algorithm
+        /// </summary>
+        public AlgorithmStatus AlgorithmStatus => AlgorithmStatus.Completed;
 
         /// <summary>
         /// This is used by the regression test system to indicate what the expected statistics are from running the algorithm
         /// </summary>
         public Dictionary<string, string> ExpectedStatistics => new Dictionary<string, string>
         {
-            {"Total Trades", "3"},
+            {"Total Orders", "4"},
             {"Average Win", "0%"},
-            {"Average Loss", "-0.03%"},
-            {"Compounding Annual Return", "-2.503%"},
-            {"Drawdown", "0.000%"},
+            {"Average Loss", "-0.10%"},
+            {"Compounding Annual Return", "-14.232%"},
+            {"Drawdown", "0.200%"},
             {"Expectancy", "-1"},
-            {"Net Profit", "-0.032%"},
-            {"Sharpe Ratio", "0"},
-            {"Probabilistic Sharpe Ratio", "0%"},
+            {"Start Equity", "100000"},
+            {"End Equity", "99803.9"},
+            {"Net Profit", "-0.196%"},
+            {"Sharpe Ratio", "-7.95"},
+            {"Sortino Ratio", "0"},
+            {"Probabilistic Sharpe Ratio", "0.401%"},
             {"Loss Rate", "100%"},
             {"Win Rate", "0%"},
             {"Profit-Loss Ratio", "0"},
-            {"Alpha", "0"},
-            {"Beta", "0"},
-            {"Annual Standard Deviation", "0"},
+            {"Alpha", "-0.128"},
+            {"Beta", "0.026"},
+            {"Annual Standard Deviation", "0.016"},
             {"Annual Variance", "0"},
-            {"Information Ratio", "-0.678"},
-            {"Tracking Error", "0.243"},
-            {"Treynor Ratio", "0"},
-            {"Total Fees", "$7.40"},
-            {"Estimated Strategy Capacity", "$2100000.00"},
-            {"Lowest Capacity Asset", "ES VMKLFZIH2MTD"},
-            {"Fitness Score", "0.419"},
-            {"Kelly Criterion Estimate", "0"},
-            {"Kelly Criterion Probability Value", "0"},
-            {"Sortino Ratio", "79228162514264337593543950335"},
-            {"Return Over Maximum Drawdown", "-81.557"},
-            {"Portfolio Turnover", "0.837"},
-            {"Total Insights Generated", "0"},
-            {"Total Insights Closed", "0"},
-            {"Total Insights Analysis Completed", "0"},
-            {"Long Insight Count", "0"},
-            {"Short Insight Count", "0"},
-            {"Long/Short Ratio", "100%"},
-            {"Estimated Monthly Alpha Value", "$0"},
-            {"Total Accumulated Estimated Alpha Value", "$0"},
-            {"Mean Population Estimated Insight Value", "$0"},
-            {"Mean Population Direction", "0%"},
-            {"Mean Population Magnitude", "0%"},
-            {"Rolling Averaged Population Direction", "0%"},
-            {"Rolling Averaged Population Magnitude", "0%"},
-            {"OrderListHash", "68775c18eb40c1bde212653faec4016e"}
+            {"Information Ratio", "-1.186"},
+            {"Tracking Error", "0.237"},
+            {"Treynor Ratio", "-4.747"},
+            {"Total Fees", "$8.60"},
+            {"Estimated Strategy Capacity", "$2000.00"},
+            {"Lowest Capacity Asset", "ES VU1EHIDJYLMP"},
+            {"Portfolio Turnover", "66.50%"},
+            {"Drawdown Recovery", "0"},
+            {"OrderListHash", "4720516462fcabb4db1aead46051cb4a"}
         };
     }
 }

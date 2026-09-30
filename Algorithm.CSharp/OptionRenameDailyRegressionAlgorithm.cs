@@ -62,7 +62,7 @@ namespace QuantConnect.Algorithm.CSharp
             {
                 if (dividend.ReferencePrice != 32.6m || dividend.Distribution != 3.82m)
                 {
-                    throw new Exception($"{Time} - Invalid dividend {dividend}");
+                    throw new RegressionTestException($"{Time} - Invalid dividend {dividend}");
                 }
             }
             if (!Portfolio.Invested)
@@ -86,24 +86,24 @@ namespace QuantConnect.Algorithm.CSharp
                         Buy(_underlyingSymbol, 100);
 
                         // Check
-                        if (slice.Time != new DateTime(2013, 6, 28))
+                        if (slice.Time != new DateTime(2013, 6, 27, 16, 0, 0))
                         {
-                            throw new Exception(@"Received first contract at {slice.Time}; Expected at 6/28/2013 12AM.");
+                            throw new RegressionTestException($"Received first contract at {slice.Time}; Expected at 6/28/2013 12AM.");
                         }
 
                         if (contract.AskPrice != 1.15m)
                         {
-                            throw new Exception("Current ask price was not loaded from NWSA backtest file and is not $1.1");
+                            throw new RegressionTestException("Current ask price was not loaded from NWSA backtest file and is not $1.1");
                         }
 
                         if (contract.UnderlyingSymbol.Value != "NWSA")
                         {
-                            throw new Exception("Contract underlying symbol was not NWSA as expected");
+                            throw new RegressionTestException("Contract underlying symbol was not NWSA as expected");
                         }
                     }
                 }
             }
-            else if (slice.Time.Day == 3) // Final day
+            else if (slice.Time == new DateTime(2013, 7, 2, 16, 0, 0)) // The end
             {
                 // selling positions
                 Liquidate();
@@ -114,7 +114,7 @@ namespace QuantConnect.Algorithm.CSharp
                 {
                     if (chain.Underlying.Symbol.Value != "FOXA")
                     {
-                        throw new Exception("Chain underlying symbol was not FOXA as expected");
+                        throw new RegressionTestException("Chain underlying symbol was not FOXA as expected");
                     }
 
                     var contract =
@@ -124,7 +124,7 @@ namespace QuantConnect.Algorithm.CSharp
 
                     if (contract.BidPrice != 0.05m)
                     {
-                        throw new Exception("Current bid price was not loaded from FOXA file and is not $0.05");
+                        throw new RegressionTestException("Current bid price was not loaded from FOXA file and is not $0.05");
                     }
                 }
             }
@@ -133,7 +133,7 @@ namespace QuantConnect.Algorithm.CSharp
         /// <summary>
         /// Order fill event handler. On an order fill update the resulting information is passed to this method.
         /// </summary>
-        /// <param name="orderEvent">Order event details containing details of the evemts</param>
+        /// <param name="orderEvent">Order event details containing details of the events</param>
         /// <remarks>This method can be called asynchronously and so should only be used by seasoned C# experts. Ensure you use proper locks on thread-unsafe objects</remarks>
         public override void OnOrderEvent(OrderEvent orderEvent)
         {
@@ -148,22 +148,40 @@ namespace QuantConnect.Algorithm.CSharp
         /// <summary>
         /// This is used by the regression test system to indicate which languages this algorithm is written in.
         /// </summary>
-        public Language[] Languages { get; } = { Language.CSharp };
+        public List<Language> Languages { get; } = new() { Language.CSharp };
+
+        /// <summary>
+        /// Data Points count of all timeslices of algorithm
+        /// </summary>
+        public long DataPoints => 871;
+
+        /// <summary>
+        /// Data Points count of the algorithm history
+        /// </summary>
+        public int AlgorithmHistoryDataPoints => 0;
+
+        /// <summary>
+        /// Final status of the algorithm
+        /// </summary>
+        public AlgorithmStatus AlgorithmStatus => AlgorithmStatus.Completed;
 
         /// <summary>
         /// This is used by the regression test system to indicate what the expected statistics are from running the algorithm
         /// </summary>
         public Dictionary<string, string> ExpectedStatistics => new Dictionary<string, string>
         {
-            {"Total Trades", "2"},
+            {"Total Orders", "4"},
             {"Average Win", "0%"},
             {"Average Loss", "0%"},
-            {"Compounding Annual Return", "-0.273%"},
+            {"Compounding Annual Return", "-0.289%"},
             {"Drawdown", "0.000%"},
             {"Expectancy", "0"},
+            {"Start Equity", "1000000"},
+            {"End Equity", "999955"},
             {"Net Profit", "-0.004%"},
-            {"Sharpe Ratio", "-2.264"},
-            {"Probabilistic Sharpe Ratio", "32.662%"},
+            {"Sharpe Ratio", "-9.76"},
+            {"Sortino Ratio", "0"},
+            {"Probabilistic Sharpe Ratio", "1.985%"},
             {"Loss Rate", "0%"},
             {"Win Rate", "0%"},
             {"Profit-Loss Ratio", "0"},
@@ -176,27 +194,10 @@ namespace QuantConnect.Algorithm.CSharp
             {"Treynor Ratio", "0"},
             {"Total Fees", "$2.00"},
             {"Estimated Strategy Capacity", "$0"},
-            {"Lowest Capacity Asset", "NWSA VJ5IKAXU7WBQ|NWSA T3MO1488O0H1"},
-            {"Fitness Score", "0"},
-            {"Kelly Criterion Estimate", "0"},
-            {"Kelly Criterion Probability Value", "0"},
-            {"Sortino Ratio", "-1.168"},
-            {"Return Over Maximum Drawdown", "-6.338"},
-            {"Portfolio Turnover", "0"},
-            {"Total Insights Generated", "0"},
-            {"Total Insights Closed", "0"},
-            {"Total Insights Analysis Completed", "0"},
-            {"Long Insight Count", "0"},
-            {"Short Insight Count", "0"},
-            {"Long/Short Ratio", "100%"},
-            {"Estimated Monthly Alpha Value", "$0"},
-            {"Total Accumulated Estimated Alpha Value", "$0"},
-            {"Mean Population Estimated Insight Value", "$0"},
-            {"Mean Population Direction", "0%"},
-            {"Mean Population Magnitude", "0%"},
-            {"Rolling Averaged Population Direction", "0%"},
-            {"Rolling Averaged Population Magnitude", "0%"},
-            {"OrderListHash", "8b89135535d842f6df7b2849d6604fbd"}
+            {"Lowest Capacity Asset", "NWSA VJ5IKAXUC6NA|NWSA T3MO1488O0H1"},
+            {"Portfolio Turnover", "0.06%"},
+            {"Drawdown Recovery", "0"},
+            {"OrderListHash", "bab17a4489f3ecf79df28e661de80a9f"}
         };
     }
 }

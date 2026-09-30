@@ -22,7 +22,6 @@ using QuantConnect.Util;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using static QuantConnect.StringExtensions;
 
 namespace QuantConnect.Brokerages
 {
@@ -31,14 +30,21 @@ namespace QuantConnect.Brokerages
     /// </summary>
     public class SamcoBrokerageModel : DefaultBrokerageModel
     {
-        private readonly Type[] _supportedTimeInForces =
+        private readonly HashSet<Type> _supportedTimeInForces = new()
         {
             typeof(GoodTilCanceledTimeInForce),
             typeof(DayTimeInForce),
             typeof(GoodTilDateTimeInForce)
         };
 
-        private const decimal _maxLeverage = 7m;
+        private readonly HashSet<OrderType> _supportedOrderTypes = new()
+        {
+            OrderType.Market,
+            OrderType.Limit,
+            OrderType.StopMarket
+        };
+
+        private const decimal _maxLeverage = 5m;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="SamcoBrokerageModel"/> class
@@ -93,6 +99,11 @@ namespace QuantConnect.Brokerages
         /// <returns>True if the brokerage could process the order, false otherwise</returns>
         public override bool CanSubmitOrder(Security security, Order order, out BrokerageMessageEvent message)
         {
+            if (!this.ValidateContingentOrdersNotSupported(order, out message))
+            {
+                return false;
+            }
+
             message = null;
 
             // validate security type
@@ -101,8 +112,8 @@ namespace QuantConnect.Brokerages
                 security.Type != SecurityType.Future)
             {
                 message = new BrokerageMessageEvent(BrokerageMessageType.Warning, "NotSupported",
-                    Invariant($"The {nameof(SamcoBrokerageModel)} does not support {security.Type} security type.")
-                );
+                    Messages.DefaultBrokerageModel.UnsupportedSecurityType(this, security));
+
 
                 return false;
             }
@@ -111,8 +122,16 @@ namespace QuantConnect.Brokerages
             if (!_supportedTimeInForces.Contains(order.TimeInForce.GetType()))
             {
                 message = new BrokerageMessageEvent(BrokerageMessageType.Warning, "NotSupported",
-                    Invariant($"The {nameof(SamcoBrokerageModel)} does not support {order.TimeInForce.GetType().Name} time in force.")
-                );
+                    Messages.DefaultBrokerageModel.UnsupportedTimeInForce(this, order));
+
+                return false;
+            }
+
+            // validate order type
+            if (!_supportedOrderTypes.Contains(order.Type))
+            {
+                message = new BrokerageMessageEvent(BrokerageMessageType.Warning, "NotSupported",
+                    Messages.DefaultBrokerageModel.UnsupportedOrderType(this, order, _supportedOrderTypes));
 
                 return false;
             }
@@ -142,20 +161,6 @@ namespace QuantConnect.Brokerages
         public override IReadOnlyDictionary<SecurityType, string> DefaultMarkets { get; } = GetDefaultMarkets();
 
         /// <summary>
-        /// Gets a new buying power model for the security, returning the default model with the
-        /// security's configured leverage. For cash accounts, leverage = 1 is used. For margin
-        /// trading, max leverage = 7
-        /// </summary>
-        /// <param name="security">The security to get a buying power model for</param>
-        /// <returns>The buying power model for this brokerage/security</returns>
-        public override IBuyingPowerModel GetBuyingPowerModel(Security security)
-        {
-            return AccountType == AccountType.Cash
-                ? (IBuyingPowerModel)new CashBuyingPowerModel()
-                : new SecurityMarginModel(_maxLeverage);
-        }
-
-        /// <summary>
         /// Samco global leverage rule
         /// </summary>
         /// <param name="security"></param>
@@ -172,7 +177,7 @@ namespace QuantConnect.Brokerages
                 return _maxLeverage;
             }
 
-            throw new ArgumentException($"Invalid security type: {security.Type}", nameof(security));
+            throw new ArgumentException(Messages.DefaultBrokerageModel.InvalidSecurityTypeForLeverage(security), nameof(security));
         }
 
         /// <summary>

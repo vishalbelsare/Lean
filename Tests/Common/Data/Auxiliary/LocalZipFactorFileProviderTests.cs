@@ -61,7 +61,7 @@ namespace QuantConnect.Tests.Common.Data.Auxiliary
         public void CacheIsCleared()
         {
             var fileProviderTest = new LocalZipFactorFileProviderTest();
-            var dataProviderTest = new DefaultDataProviderTest();
+            using var dataProviderTest = new DefaultDataProviderTest();
 
             fileProviderTest.Initialize(TestGlobals.MapFileProvider, dataProviderTest);
             fileProviderTest.CacheCleared.Reset();
@@ -85,7 +85,7 @@ namespace QuantConnect.Tests.Common.Data.Auxiliary
         {
             public bool Enabled = true;
             public readonly ManualResetEvent CacheCleared = new (false);
-            protected override TimeSpan CacheRefreshPeriod => TimeSpan.FromMilliseconds(500);
+            protected override TimeSpan CacheRefreshPeriod => TimeSpan.FromMilliseconds(300);
 
             protected override void StartExpirationTask()
             {

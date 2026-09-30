@@ -16,6 +16,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using QuantConnect.Brokerages;
 using QuantConnect.Data;
 using QuantConnect.Interfaces;
 
@@ -33,6 +34,7 @@ namespace QuantConnect.Algorithm.CSharp
         {
             SetStartDate(2018, 04, 04);
             SetEndDate(2018, 04, 04);
+            SetBrokerageModel(BrokerageName.GDAX, AccountType.Cash);
 
             // GDAX doesn't have LTCETH or ETHLTC, but they do have ETHUSD and LTCUSD to form a path between ETH and LTC
             SetAccountCurrency("ETH");
@@ -62,19 +64,19 @@ namespace QuantConnect.Algorithm.CSharp
 
             if (conversionSymbols.Count != 2)
             {
-                throw new Exception(
+                throw new RegressionTestException(
                     $"Expected two conversion rate securities for LTC to ETH, is {conversionSymbols.Count}");
             }
 
             if (conversionSymbols[0] != _ltcUsdSymbol)
             {
-                throw new Exception(
+                throw new RegressionTestException(
                     $"Expected first conversion rate security from LTC to ETH to be {_ltcUsdSymbol}, is {conversionSymbols[0]}");
             }
 
             if (conversionSymbols[1] != _ethUsdSymbol)
             {
-                throw new Exception(
+                throw new RegressionTestException(
                     $"Expected second conversion rate security from LTC to ETH to be {_ethUsdSymbol}, is {conversionSymbols[1]}");
             }
 
@@ -86,7 +88,7 @@ namespace QuantConnect.Algorithm.CSharp
 
             if (actualConversionRate != expectedConversionRate)
             {
-                throw new Exception(
+                throw new RegressionTestException(
                     $"Expected conversion rate from LTC to ETH to be {expectedConversionRate}, is {actualConversionRate}");
             }
         }
@@ -99,21 +101,39 @@ namespace QuantConnect.Algorithm.CSharp
         /// <summary>
         /// This is used by the regression test system to indicate which languages this algorithm is written in.
         /// </summary>
-        public Language[] Languages { get; } = { Language.CSharp, Language.Python };
+        public List<Language> Languages { get; } = new() { Language.CSharp, Language.Python };
+
+        /// <summary>
+        /// Data Points count of all timeslices of algorithm
+        /// </summary>
+        public long DataPoints => 5765;
+
+        /// <summary>
+        /// Data Points count of the algorithm history
+        /// </summary>
+        public int AlgorithmHistoryDataPoints => 20;
+
+        /// <summary>
+        /// Final status of the algorithm
+        /// </summary>
+        public AlgorithmStatus AlgorithmStatus => AlgorithmStatus.Completed;
 
         /// <summary>
         /// This is used by the regression test system to indicate what the expected statistics are from running the algorithm
         /// </summary>
         public Dictionary<string, string> ExpectedStatistics => new Dictionary<string, string>
         {
-            {"Total Trades", "1"},
+            {"Total Orders", "1"},
             {"Average Win", "0%"},
             {"Average Loss", "0%"},
             {"Compounding Annual Return", "0%"},
             {"Drawdown", "0%"},
             {"Expectancy", "0"},
+            {"Start Equity", "132337.76"},
+            {"End Equity", "131620.05"},
             {"Net Profit", "0%"},
             {"Sharpe Ratio", "0"},
+            {"Sortino Ratio", "0"},
             {"Probabilistic Sharpe Ratio", "0%"},
             {"Loss Rate", "0%"},
             {"Win Rate", "0%"},
@@ -125,29 +145,12 @@ namespace QuantConnect.Algorithm.CSharp
             {"Information Ratio", "0"},
             {"Tracking Error", "0"},
             {"Treynor Ratio", "0"},
-            {"Total Fees", "$0.00"},
-            {"Estimated Strategy Capacity", "$2000.00"},
-            {"Lowest Capacity Asset", "LTCUSD XJ"},
-            {"Fitness Score", "0"},
-            {"Kelly Criterion Estimate", "0"},
-            {"Kelly Criterion Probability Value", "0"},
-            {"Sortino Ratio", "79228162514264337593543950335"},
-            {"Return Over Maximum Drawdown", "-139.899"},
-            {"Portfolio Turnover", "0"},
-            {"Total Insights Generated", "0"},
-            {"Total Insights Closed", "0"},
-            {"Total Insights Analysis Completed", "0"},
-            {"Long Insight Count", "0"},
-            {"Short Insight Count", "0"},
-            {"Long/Short Ratio", "100%"},
-            {"Estimated Monthly Alpha Value", "Ξ0"},
-            {"Total Accumulated Estimated Alpha Value", "Ξ0"},
-            {"Mean Population Estimated Insight Value", "Ξ0"},
-            {"Mean Population Direction", "0%"},
-            {"Mean Population Magnitude", "0%"},
-            {"Rolling Averaged Population Direction", "0%"},
-            {"Rolling Averaged Population Magnitude", "0%"},
-            {"OrderListHash", "9ffe1c1c11cbeaa5cc2d18048c4f3049"}
+            {"Total Fees", "Ξ0.00"},
+            {"Estimated Strategy Capacity", "Ξ2000.00"},
+            {"Lowest Capacity Asset", "LTCUSD 2XR"},
+            {"Portfolio Turnover", "0.00%"},
+            {"Drawdown Recovery", "0"},
+            {"OrderListHash", "c5d6001a28b12bd2d6c714a9aaa3aa07"}
         };
     }
 }

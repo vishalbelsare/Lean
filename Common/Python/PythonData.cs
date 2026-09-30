@@ -1,4 +1,4 @@
-﻿/*
+/*
  * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
  * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
  *
@@ -27,11 +27,39 @@ namespace QuantConnect.Python
     public class PythonData : DynamicData
     {
         private readonly string _pythonTypeName;
+        private readonly dynamic _pythonReader;
+        private readonly dynamic _pythonGetSource;
         private readonly dynamic _pythonData;
         private readonly dynamic _defaultResolution;
         private readonly dynamic _supportedResolutions;
         private readonly dynamic _isSparseData;
         private readonly dynamic _requiresMapping;
+        private DateTime _endTime;
+
+        /// <summary>
+        /// The end time of this data. Some data covers spans (trade bars)
+        /// and as such we want to know the entire time span covered
+        /// </summary>
+        /// <remarks>
+        /// This property is overriden to allow different values for Time and EndTime
+        /// if they are set in the Reader. In the base implementation EndTime equals Time
+        /// </remarks>
+        public override DateTime EndTime
+        {
+            get
+            {
+                return _endTime == default ? Time : _endTime;
+            }
+            set
+            {
+                _endTime = value;
+                if(Time == default)
+                {
+                    // if Time hasn't been set let's set it, like BaseData does. If the user overrides it that's okay
+                    Time = value;
+                }
+            }
+        }
 
         /// <summary>
         /// Constructor for initializing the PythonData class
@@ -51,10 +79,12 @@ namespace QuantConnect.Python
             using (Py.GIL())
             {
                 // these methods rely on the Symbol so we can call them yet but we can get them
-                _requiresMapping = pythonData.GetPythonMethod("RequiresMapping");
-                _isSparseData = pythonData.GetPythonMethod("IsSparseData");
-                _defaultResolution = pythonData.GetPythonMethod("DefaultResolution");
-                _supportedResolutions = pythonData.GetPythonMethod("SupportedResolutions");
+                _requiresMapping = pythonData.GetMethod("RequiresMapping");
+                _isSparseData = pythonData.GetMethod("IsSparseData");
+                _defaultResolution = pythonData.GetMethod("DefaultResolution");
+                _supportedResolutions = pythonData.GetMethod("SupportedResolutions");
+                _pythonReader = pythonData.GetMethod("Reader");
+                _pythonGetSource = pythonData.GetMethod("GetSource");
                 _pythonTypeName = pythonData.GetPythonType().GetAssemblyName().Name;
             }
         }
@@ -70,7 +100,7 @@ namespace QuantConnect.Python
         {
             using (Py.GIL())
             {
-                var source = _pythonData.GetSource(config, date, isLiveMode);
+                var source = _pythonGetSource(config, date, isLiveMode);
                 return (source as PyObject).GetAndDispose<SubscriptionDataSource>();
             }
         }
@@ -87,7 +117,7 @@ namespace QuantConnect.Python
         {
             using (Py.GIL())
             {
-                var data = _pythonData.Reader(config, line, date, isLiveMode);
+                var data = _pythonReader(config, line, date, isLiveMode);
                 var result = (data as PyObject).GetAndDispose<BaseData>();
 
                 (result as PythonData)?.SetProperty("__typename", _pythonTypeName);

@@ -43,20 +43,20 @@ namespace QuantConnect.Algorithm.CSharp
             // Equities Resolutions: Tick, Second, Minute, Hour, Daily.
             AddEquity("YESBANK", Resolution.Minute, Market.India);
 
-            //Set Order Prperties as per the requirements for order placement
+            //Set Order Properties as per the requirements for order placement
             DefaultOrderProperties = new IndiaOrderProperties(exchange: Exchange.NSE);
             //override default productType value set in config.json if needed - order specific productType value
             //DefaultOrderProperties = new IndiaOrderProperties(exchange: Exchange.NSE, IndiaOrderProperties.IndiaProductType.CNC);
 
             // General Debug statement for acknowledgement
-            Debug("Intialization Done");
+            Debug("Initialization Done");
         }
 
         /// <summary>
         /// OnData event is the primary entry point for your algorithm. Each new data point will be pumped in here.
         /// </summary>
         /// <param name="data">Slice object keyed by symbol containing the stock data</param>
-        public override void OnData(Slice data)
+        public override void OnData(Slice slice)
         {
             if (!Portfolio.Invested)
             {
@@ -80,22 +80,40 @@ namespace QuantConnect.Algorithm.CSharp
         /// <summary>
         /// This is used by the regression test system to indicate which languages this algorithm is written in.
         /// </summary>
-        public Language[] Languages { get; } = { Language.CSharp, Language.Python };
+        public List<Language> Languages { get; } = new() { Language.CSharp, Language.Python };
+
+        /// <summary>
+        /// Data Points count of all timeslices of algorithm
+        /// </summary>
+        public long DataPoints => 29524;
+
+        /// <summary>
+        /// Data Points count of the algorithm history
+        /// </summary>
+        public int AlgorithmHistoryDataPoints => 0;
+
+        /// <summary>
+        /// Final status of the algorithm
+        /// </summary>
+        public AlgorithmStatus AlgorithmStatus => AlgorithmStatus.Completed;
 
         /// <summary>
         /// This is used by the regression test system to indicate what the expected statistics are from running the algorithm
         /// </summary>
         public Dictionary<string, string> ExpectedStatistics => new Dictionary<string, string>
         {
-            {"Total Trades", "1"},
+            {"Total Orders", "1"},
             {"Average Win", "0%"},
             {"Average Loss", "0%"},
             {"Compounding Annual Return", "-0.010%"},
             {"Drawdown", "0.000%"},
             {"Expectancy", "0"},
+            {"Start Equity", "100000"},
+            {"End Equity", "99992.45"},
             {"Net Profit", "-0.008%"},
-            {"Sharpe Ratio", "-1.183"},
-            {"Probabilistic Sharpe Ratio", "0.001%"},
+            {"Sharpe Ratio", "-497.389"},
+            {"Sortino Ratio", "-73.22"},
+            {"Probabilistic Sharpe Ratio", "0.794%"},
             {"Loss Rate", "0%"},
             {"Win Rate", "0%"},
             {"Profit-Loss Ratio", "0"},
@@ -106,29 +124,12 @@ namespace QuantConnect.Algorithm.CSharp
             {"Information Ratio", "-1.183"},
             {"Tracking Error", "0"},
             {"Treynor Ratio", "0"},
-            {"Total Fees", "$6.00"},
-            {"Estimated Strategy Capacity", "$61000000000.00"},
+            {"Total Fees", "₹6.00"},
+            {"Estimated Strategy Capacity", "₹61000000000.00"},
             {"Lowest Capacity Asset", "YESBANK UL"},
-            {"Fitness Score", "0"},
-            {"Kelly Criterion Estimate", "0"},
-            {"Kelly Criterion Probability Value", "0"},
-            {"Sortino Ratio", "-0.247"},
-            {"Return Over Maximum Drawdown", "-1.104"},
-            {"Portfolio Turnover", "0"},
-            {"Total Insights Generated", "0"},
-            {"Total Insights Closed", "0"},
-            {"Total Insights Analysis Completed", "0"},
-            {"Long Insight Count", "0"},
-            {"Short Insight Count", "0"},
-            {"Long/Short Ratio", "100%"},
-            {"Estimated Monthly Alpha Value", "₹0"},
-            {"Total Accumulated Estimated Alpha Value", "₹0"},
-            {"Mean Population Estimated Insight Value", "₹0"},
-            {"Mean Population Direction", "0%"},
-            {"Mean Population Magnitude", "0%"},
-            {"Rolling Averaged Population Direction", "0%"},
-            {"Rolling Averaged Population Magnitude", "0%"},
-            {"OrderListHash", "6cc69218edd7bd461678b9ee0c575db5"}
+            {"Portfolio Turnover", "0.00%"},
+            {"Drawdown Recovery", "0"},
+            {"OrderListHash", "06f782c83dd633dac6f228b91273ba26"}
         };
     }
 }

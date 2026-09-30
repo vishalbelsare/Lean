@@ -1,4 +1,4 @@
-﻿/*
+/*
  * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
  * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
  *
@@ -19,7 +19,6 @@ using QuantConnect.Util;
 using QuantConnect.Interfaces;
 using QuantConnect.Securities;
 using System.Collections.Generic;
-using QuantConnect.Configuration;
 using QuantConnect.Data.Auxiliary;
 
 namespace QuantConnect.Data.UniverseSelection
@@ -30,15 +29,17 @@ namespace QuantConnect.Data.UniverseSelection
     public class ContinuousContractUniverse : Universe, ITimeTriggeredUniverse
     {
         private readonly  IMapFileProvider _mapFileProvider;
+        private readonly SubscriptionDataConfig _config;
         private readonly Security _security;
         private readonly bool _liveMode;
         private Symbol _currentSymbol;
         private string _mappedSymbol;
 
         /// <summary>
-        /// Gets the settings used for subscriptions added for this universe
+        /// True if this universe filter can run async in the data stack
+        /// TODO: see IContinuousSecurity.Mapped
         /// </summary>
-        public override UniverseSettings UniverseSettings { get; }
+        public override bool Asynchronous => false;
 
         /// <summary>
         /// Creates a new instance
@@ -49,8 +50,9 @@ namespace QuantConnect.Data.UniverseSelection
             _security = security;
             _liveMode = liveMode;
             UniverseSettings = universeSettings;
-            var mapFileProviderTypeName = Config.Get("map-file-provider", "LocalDiskMapFileProvider");
-            _mapFileProvider = Composer.Instance.GetExportedValueByTypeName<IMapFileProvider>(mapFileProviderTypeName);
+            _mapFileProvider = Composer.Instance.GetPart<IMapFileProvider>();
+
+            _config = new SubscriptionDataConfig(Configuration, dataMappingMode: UniverseSettings.DataMappingMode, symbol: _security.Symbol.Canonical);
         }
 
         /// <summary>
@@ -63,11 +65,8 @@ namespace QuantConnect.Data.UniverseSelection
         {
             yield return _security.Symbol.Canonical;
 
-            var mapFile = _mapFileProvider.ResolveMapFile(new SubscriptionDataConfig(Configuration,
-                dataMappingMode: UniverseSettings.DataMappingMode,
-                symbol: _security.Symbol.Canonical));
-
-            var mappedSymbol = mapFile.GetMappedSymbol(utcTime.ConvertFromUtc(_security.Exchange.TimeZone));
+            var mapFile = _mapFileProvider.ResolveMapFile(_config);
+            var mappedSymbol = mapFile.GetMappedSymbol(utcTime.ConvertFromUtc(_security.Exchange.TimeZone), dataMappingMode: _config.DataMappingMode);
             if (!string.IsNullOrEmpty(mappedSymbol) && mappedSymbol != _mappedSymbol)
             {
                 if (_currentSymbol != null)
@@ -84,6 +83,7 @@ namespace QuantConnect.Data.UniverseSelection
 
             if (_currentSymbol != null)
             {
+                // TODO: this won't work with async universe selection
                 ((IContinuousSecurity)_security).Mapped = _currentSymbol;
                 yield return _currentSymbol;
             }
@@ -102,17 +102,8 @@ namespace QuantConnect.Data.UniverseSelection
             DateTime maximumEndTimeUtc,
             ISubscriptionDataConfigService subscriptionService)
         {
-            var isInternal = !security.Symbol.IsCanonical();
-            var result = subscriptionService.Add(security.Symbol,
-                UniverseSettings.Resolution,
-                UniverseSettings.FillForward,
-                UniverseSettings.ExtendedMarketHours,
-                dataNormalizationMode: UniverseSettings.DataNormalizationMode,
-                subscriptionDataTypes: UniverseSettings.SubscriptionDataTypes,
-                dataMappingMode: UniverseSettings.DataMappingMode,
-                contractDepthOffset: (uint)Math.Abs(UniverseSettings.ContractDepthOffset),
-                isInternalFeed: isInternal);
-            return result.Select(config => new SubscriptionRequest(isUniverseSubscription: false,
+            var configs = AddConfigurations(subscriptionService, UniverseSettings, security.Symbol);
+            return configs.Select(config => new SubscriptionRequest(isUniverseSubscription: false,
                 universe: this,
                 security: security,
                 configuration: new SubscriptionDataConfig(config, isInternalFeed: config.IsInternalFeed || config.TickType == TickType.OpenInterest),
@@ -129,9 +120,34 @@ namespace QuantConnect.Data.UniverseSelection
             var startTimeLocal = startTimeUtc.ConvertFromUtc(_security.Exchange.TimeZone);
             var endTimeLocal = endTimeUtc.ConvertFromUtc(_security.Exchange.TimeZone);
 
-            return Time.EachTradeableDay(_security, startTimeLocal, endTimeLocal)
+            return Time.EachTradeableDay(_security, startTimeLocal, endTimeLocal, Configuration.ExtendedMarketHours)
+                // in live trading selection happens on start see 'DataQueueFuturesChainUniverseDataCollectionEnumerator'
+                .Where(tradeableDay => _liveMode || tradeableDay >= startTimeLocal)
                 // in live trading we delay selection so that we make sure auxiliary data is ready
                 .Select(time => _liveMode ? time.Add(Time.LiveAuxiliaryDataOffset) : time);
+        }
+
+        /// <summary>
+        /// Helper method to add and get the required configurations associated with a continuous universe
+        /// </summary>
+        public static List<SubscriptionDataConfig> AddConfigurations(ISubscriptionDataConfigService subscriptionService, UniverseSettings universeSettings, Symbol symbol)
+        {
+            List<SubscriptionDataConfig> configs = new(universeSettings.SubscriptionDataTypes.Count);
+            foreach (var pair in universeSettings.SubscriptionDataTypes)
+            {
+                configs.AddRange(subscriptionService.Add(symbol,
+                    universeSettings.Resolution,
+                    universeSettings.FillForward,
+                    universeSettings.ExtendedMarketHours,
+                    dataNormalizationMode: universeSettings.DataNormalizationMode,
+                    // we need to provider the data types we want, else since it's canonical it would assume the default ZipEntry type used in universe chain
+                    subscriptionDataTypes: new List<Tuple<Type, TickType>> { pair },
+                    dataMappingMode: universeSettings.DataMappingMode,
+                    contractDepthOffset: (uint)Math.Abs(universeSettings.ContractDepthOffset),
+                    // open interest is internal and the underlying mapped contracts of the continuous canonical
+                    isInternalFeed: !symbol.IsCanonical() || pair.Item2 == TickType.OpenInterest));
+            }
+            return configs;
         }
 
         /// <summary>

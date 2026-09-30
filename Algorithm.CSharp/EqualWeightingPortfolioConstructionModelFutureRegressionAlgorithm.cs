@@ -111,7 +111,7 @@ namespace QuantConnect.Algorithm.CSharp
                 {
                     if (Portfolio.TotalHoldingsValue / Portfolio.TotalPortfolioValue < 10)
                     {
-                        throw new Exception("Expected to be trading using the futures margin leverage");
+                        throw new RegressionTestException("Expected to be trading using the futures margin leverage");
                     }
                 }
             }
@@ -125,55 +125,56 @@ namespace QuantConnect.Algorithm.CSharp
         /// <summary>
         /// This is used by the regression test system to indicate which languages this algorithm is written in.
         /// </summary>
-        public Language[] Languages { get; } = { Language.CSharp };
+        public List<Language> Languages { get; } = new() { Language.CSharp };
+
+        /// <summary>
+        /// Data Points count of all timeslices of algorithm
+        /// </summary>
+        public long DataPoints => 36213;
+
+        /// <summary>
+        /// Data Points count of the algorithm history
+        /// </summary>
+        public int AlgorithmHistoryDataPoints => 0;
+
+        /// <summary>
+        /// Final status of the algorithm
+        /// </summary>
+        public AlgorithmStatus AlgorithmStatus => AlgorithmStatus.Completed;
 
         /// <summary>
         /// This is used by the regression test system to indicate what the expected statistics are from running the algorithm
         /// </summary>
         public Dictionary<string, string> ExpectedStatistics => new Dictionary<string, string>
         {
-            {"Total Trades", "7"},
-            {"Average Win", "0%"},
-            {"Average Loss", "-1.40%"},
-            {"Compounding Annual Return", "-99.829%"},
-            {"Drawdown", "29.500%"},
-            {"Expectancy", "-1"},
-            {"Net Profit", "-7.888%"},
-            {"Sharpe Ratio", "-0.593"},
-            {"Probabilistic Sharpe Ratio", "34.346%"},
-            {"Loss Rate", "100%"},
-            {"Win Rate", "0%"},
-            {"Profit-Loss Ratio", "0"},
-            {"Alpha", "-15.391"},
-            {"Beta", "7.259"},
-            {"Annual Standard Deviation", "1.679"},
-            {"Annual Variance", "2.818"},
-            {"Information Ratio", "-2.032"},
-            {"Tracking Error", "1.466"},
-            {"Treynor Ratio", "-0.137"},
-            {"Total Fees", "$40.70"},
-            {"Estimated Strategy Capacity", "$4000000.00"},
+            {"Total Orders", "8"},
+            {"Average Win", "0.69%"},
+            {"Average Loss", "-2.47%"},
+            {"Compounding Annual Return", "-99.946%"},
+            {"Drawdown", "28.600%"},
+            {"Expectancy", "-0.680"},
+            {"Start Equity", "100000"},
+            {"End Equity", "90213.76"},
+            {"Net Profit", "-9.786%"},
+            {"Sharpe Ratio", "-0.603"},
+            {"Sortino Ratio", "-0.892"},
+            {"Probabilistic Sharpe Ratio", "30.066%"},
+            {"Loss Rate", "75%"},
+            {"Win Rate", "25%"},
+            {"Profit-Loss Ratio", "0.28"},
+            {"Alpha", "-15.818"},
+            {"Beta", "7.498"},
+            {"Annual Standard Deviation", "1.669"},
+            {"Annual Variance", "2.787"},
+            {"Information Ratio", "-2.061"},
+            {"Tracking Error", "1.447"},
+            {"Treynor Ratio", "-0.134"},
+            {"Total Fees", "$52.01"},
+            {"Estimated Strategy Capacity", "$1800000.00"},
             {"Lowest Capacity Asset", "GC VL5E74HP3EE5"},
-            {"Fitness Score", "0.072"},
-            {"Kelly Criterion Estimate", "-9.366"},
-            {"Kelly Criterion Probability Value", "0.607"},
-            {"Sortino Ratio", "-5.172"},
-            {"Return Over Maximum Drawdown", "-5.25"},
-            {"Portfolio Turnover", "4.987"},
-            {"Total Insights Generated", "10"},
-            {"Total Insights Closed", "8"},
-            {"Total Insights Analysis Completed", "8"},
-            {"Long Insight Count", "10"},
-            {"Short Insight Count", "0"},
-            {"Long/Short Ratio", "100%"},
-            {"Estimated Monthly Alpha Value", "$-78.89231"},
-            {"Total Accumulated Estimated Alpha Value", "$-12.82"},
-            {"Mean Population Estimated Insight Value", "$-1.6025"},
-            {"Mean Population Direction", "25%"},
-            {"Mean Population Magnitude", "0%"},
-            {"Rolling Averaged Population Direction", "25.058%"},
-            {"Rolling Averaged Population Magnitude", "0%"},
-            {"OrderListHash", "874fc945335aa8d93f2e3734641f9890"}
+            {"Portfolio Turnover", "475.60%"},
+            {"Drawdown Recovery", "0"},
+            {"OrderListHash", "91aeb0d6f6a18df9fd755fc473183395"}
         };
     }
 }

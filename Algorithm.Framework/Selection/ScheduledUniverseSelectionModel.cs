@@ -1,4 +1,4 @@
-﻿/*
+/*
  * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
  * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
  *
@@ -90,11 +90,16 @@ namespace QuantConnect.Algorithm.Framework.Selection
         public ScheduledUniverseSelectionModel(DateTimeZone timeZone, IDateRule dateRule, ITimeRule timeRule, PyObject selector, UniverseSettings settings = null)
         {
             Func<DateTime, object> func;
-            selector.TryConvertToDelegate(out func);
+            if (!selector.TrySafeAs(out func))
+            {
+                throw new ArgumentException(
+                    $"Unable to create a scheduled universe selector from {selector.ToDisplayString()}: it is not a function. " +
+                    "Please provide a function that takes the firing date time and returns the selected symbols.");
+            }
             _timeZone = timeZone;
             _dateRule = dateRule;
             _timeRule = timeRule;
-            _selector = func.ConvertToUniverseSelectionSymbolDelegate();
+            _selector = func.ConvertSelectionSymbolDelegate();
             _settings = settings;
         }
 

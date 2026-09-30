@@ -21,7 +21,6 @@ using System.Threading;
 using Moq;
 using NUnit.Framework;
 using QuantConnect.Data;
-using QuantConnect.Data.Auxiliary;
 using QuantConnect.Lean.Engine.DataFeeds;
 using QuantConnect.Lean.Engine.Results;
 using QuantConnect.Lean.Engine.TransactionHandlers;
@@ -58,10 +57,10 @@ namespace QuantConnect.Tests.Engine.DataFeeds
 
             var coarseSymbols = new List<Symbol> { Symbols.SPY, Symbols.AAPL, Symbols.MSFT };
 
-            var emitted = new AutoResetEvent(false);
-            var dataQueueHandler = new FuncDataQueueHandler(fdqh => Enumerable.Empty<BaseData>(), timeProvider);
+            using var emitted = new AutoResetEvent(false);
+            using var dataQueueHandler = new FuncDataQueueHandler(fdqh => Enumerable.Empty<BaseData>(), timeProvider, new AlgorithmSettings());
 
-            var feed = new TestableLiveTradingDataFeed(dataQueueHandler);
+            var feed = new TestableLiveTradingDataFeed(new AlgorithmSettings(), dataQueueHandler);
 
             var algorithm = new AlgorithmStub(feed);
             algorithm.SetLiveMode(true);
@@ -70,8 +69,8 @@ namespace QuantConnect.Tests.Engine.DataFeeds
             mock.Setup(m => m.GetOpenOrders(It.IsAny<Func<Order, bool>>())).Returns(new List<Order>());
             algorithm.Transactions.SetOrderProcessor(mock.Object);
 
-            var synchronizer = new TestableLiveSynchronizer(timeProvider);
-            synchronizer.Initialize(algorithm, algorithm.DataManager);
+            using var synchronizer = new TestableLiveSynchronizer(timeProvider);
+            synchronizer.Initialize(algorithm, algorithm.DataManager, new());
 
             feed.Initialize(algorithm, new LiveNodePacket(), new BacktestingResultHandler(),
                 TestGlobals.MapFileProvider, TestGlobals.FactorFileProvider, TestGlobals.DataProvider, algorithm.DataManager, synchronizer, new DataChannelProvider());
@@ -93,7 +92,7 @@ namespace QuantConnect.Tests.Engine.DataFeeds
 
             algorithm.PostInitialize();
 
-            var cancellationTokenSource = new CancellationTokenSource();
+            using var cancellationTokenSource = new CancellationTokenSource();
 
             Exception exceptionThrown = null;
 
@@ -147,13 +146,10 @@ namespace QuantConnect.Tests.Engine.DataFeeds
 
             timer.Value.DisposeSafely();
             algorithm.DataManager.RemoveAllSubscriptions();
-            dataQueueHandler.DisposeSafely();
-            synchronizer.DisposeSafely();
-            emitted.DisposeSafely();
 
             if (exceptionThrown != null)
             {
-                throw new Exception("Exception in timer: ", exceptionThrown);
+                throw new RegressionTestException("Exception in timer: ", exceptionThrown);
             }
 
             Assert.AreEqual(coarseTimes.Count, coarseUniverseSelectionCount, message: "coarseUniverseSelectionCount");

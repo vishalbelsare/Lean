@@ -82,7 +82,8 @@ namespace QuantConnect.Algorithm.CSharp
 
                     AssertOptionStrategyIsPresent(OptionStrategyDefinitions.ButterflyCall.Name, 10);
                     AssertDefaultGroup(_optionSymbol.Underlying, 490);
-                    AssertDefaultGroup(lowerCall.Symbol, 5);
+                    // naked call for the lowerCall contract
+                    AssertOptionStrategyIsPresent(OptionStrategyDefinitions.NakedCall.Name, 5);
 
                     MarketOrder(middleCall.Symbol, -5);
                     freeMarginPostTrade = Portfolio.MarginRemaining;
@@ -91,7 +92,8 @@ namespace QuantConnect.Algorithm.CSharp
                     AssertOptionStrategyIsPresent(OptionStrategyDefinitions.CoveredCall.Name, 4);
                     AssertOptionStrategyIsPresent(OptionStrategyDefinitions.BullCallSpread.Name, 1);
                     AssertDefaultGroup(_optionSymbol.Underlying, 90);
-                    AssertDefaultGroup(lowerCall.Symbol, 4);
+                    // naked call for the lowerCall contract
+                    AssertOptionStrategyIsPresent(OptionStrategyDefinitions.NakedCall.Name, 4);
 
                     // trade some other asset
                     MarketOrder("SPY", 200);
@@ -101,24 +103,43 @@ namespace QuantConnect.Algorithm.CSharp
                     AssertOptionStrategyIsPresent(OptionStrategyDefinitions.CoveredCall.Name, 4);
                     AssertOptionStrategyIsPresent(OptionStrategyDefinitions.BullCallSpread.Name, 1);
                     AssertDefaultGroup(_optionSymbol.Underlying, 90);
-                    AssertDefaultGroup(lowerCall.Symbol, 4);
+                    // naked call for the lowerCall contract
+                    AssertOptionStrategyIsPresent(OptionStrategyDefinitions.NakedCall.Name, 4);
                 }
             }
         }
+
+        /// <summary>
+        /// Data Points count of all timeslices of algorithm
+        /// </summary>
+        public override long DataPoints => 15204;
+
+        /// <summary>
+        /// Data Points count of the algorithm history
+        /// </summary>
+        public override int AlgorithmHistoryDataPoints => 0;
+
+        /// <summary>
+        /// Final status of the algorithm
+        /// </summary>
+        public AlgorithmStatus AlgorithmStatus => AlgorithmStatus.Completed;
 
         /// <summary>
         /// This is used by the regression test system to indicate what the expected statistics are from running the algorithm
         /// </summary>
         public override Dictionary<string, string> ExpectedStatistics => new Dictionary<string, string>
         {
-            {"Total Trades", "8"},
+            {"Total Orders", "8"},
             {"Average Win", "0%"},
             {"Average Loss", "0%"},
             {"Compounding Annual Return", "0%"},
             {"Drawdown", "0%"},
             {"Expectancy", "0"},
+            {"Start Equity", "200000"},
+            {"End Equity", "199576.82"},
             {"Net Profit", "0%"},
             {"Sharpe Ratio", "0"},
+            {"Sortino Ratio", "0"},
             {"Probabilistic Sharpe Ratio", "0%"},
             {"Loss Rate", "0%"},
             {"Win Rate", "0%"},
@@ -130,29 +151,12 @@ namespace QuantConnect.Algorithm.CSharp
             {"Information Ratio", "0"},
             {"Tracking Error", "0"},
             {"Treynor Ratio", "0"},
-            {"Total Fees", "$16.95"},
-            {"Estimated Strategy Capacity", "$1000.00"},
-            {"Lowest Capacity Asset", "GOOCV W78ZFM61MKLI|GOOCV VP83T1ZUHROL"},
-            {"Fitness Score", "0"},
-            {"Kelly Criterion Estimate", "0"},
-            {"Kelly Criterion Probability Value", "0"},
-            {"Sortino Ratio", "0"},
-            {"Return Over Maximum Drawdown", "0"},
-            {"Portfolio Turnover", "0"},
-            {"Total Insights Generated", "0"},
-            {"Total Insights Closed", "0"},
-            {"Total Insights Analysis Completed", "0"},
-            {"Long Insight Count", "0"},
-            {"Short Insight Count", "0"},
-            {"Long/Short Ratio", "100%"},
-            {"Estimated Monthly Alpha Value", "$0"},
-            {"Total Accumulated Estimated Alpha Value", "$0"},
-            {"Mean Population Estimated Insight Value", "$0"},
-            {"Mean Population Direction", "0%"},
-            {"Mean Population Magnitude", "0%"},
-            {"Rolling Averaged Population Direction", "0%"},
-            {"Rolling Averaged Population Magnitude", "0%"},
-            {"OrderListHash", "16316e5491987b323d8c9f0ff87b20ee"}
+            {"Total Fees", "$36.95"},
+            {"Estimated Strategy Capacity", "$0"},
+            {"Lowest Capacity Asset", "GOOCV W78ZFMEBFLDY|GOOCV VP83T1ZUHROL"},
+            {"Portfolio Turnover", "274.86%"},
+            {"Drawdown Recovery", "0"},
+            {"OrderListHash", "6d0e54c4897844ae98e478045bbd1569"}
         };
     }
 }

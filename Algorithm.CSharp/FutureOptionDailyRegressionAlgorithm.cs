@@ -14,13 +14,12 @@
 */
 
 using System;
-using System.Collections.Generic;
 using System.Linq;
-using System.Reflection;
 using QuantConnect.Data;
-using QuantConnect.Interfaces;
 using QuantConnect.Orders;
+using QuantConnect.Interfaces;
 using QuantConnect.Securities;
+using System.Collections.Generic;
 
 namespace QuantConnect.Algorithm.CSharp
 {
@@ -29,52 +28,55 @@ namespace QuantConnect.Algorithm.CSharp
     /// </summary>
     public class FutureOptionDailyRegressionAlgorithm : QCAlgorithm, IRegressionAlgorithmDefinition
     {
-        protected OrderTicket Ticket;
-        protected Symbol DcOption;
+        protected OrderTicket Ticket { get; set; }
+        protected Symbol ESOption { get; set; }
         protected virtual Resolution Resolution => Resolution.Daily;
-        
+        protected virtual DateTime StartDate => new DateTime(2020, 1, 6);
+        protected virtual DateTime EndDate => new DateTime(2020, 1, 8);
+
         public override void Initialize()
         {
-            SetStartDate(2012, 1, 3);
-            SetEndDate(2012, 1, 4);
+            SetStartDate(StartDate);
+            SetEndDate(EndDate);
 
             // Add our underlying future contract
-            var dc = AddFutureContract(
+            var futureContract = AddFutureContract(
                 QuantConnect.Symbol.CreateFuture(
-                    Futures.Dairy.ClassIIIMilk,
+                    Futures.Indices.SP500EMini,
                     Market.CME,
-                    new DateTime(2012, 4, 1)),
+                    new DateTime(2020, 3, 20)),
                 Resolution).Symbol;
 
             // Attempt to fetch a specific future option contract
-            DcOption = OptionChainProvider.GetOptionContractList(dc, Time)
-                .Where(x => x.ID.StrikePrice == 17m && x.ID.OptionRight == OptionRight.Call)
+            ESOption = OptionChain(futureContract)
+                .Where(x => x.ID.StrikePrice == 3200m && x.ID.OptionRight == OptionRight.Call)
                 .Select(x => AddFutureOptionContract(x, Resolution).Symbol)
                 .FirstOrDefault();
-            
+
             // Validate it is the expected contract
-            var expectedContract = QuantConnect.Symbol.CreateOption(dc, Market.CME, OptionStyle.American,
-                OptionRight.Call, 17m,
-                new DateTime(2012, 4, 01));
-            
-            if (DcOption != expectedContract)
+            var expectedContract = QuantConnect.Symbol.CreateOption(futureContract, Market.CME, OptionStyle.American,
+                OptionRight.Call, 3200m,
+                new DateTime(2020, 3, 20));
+
+            if (ESOption != expectedContract)
             {
-                throw new Exception($"Contract {DcOption} was not the expected contract {expectedContract}");
+                throw new RegressionTestException($"Contract {ESOption} was not the expected contract {expectedContract}");
             }
-            
+
             ScheduleBuySell();
         }
-        
+
         protected virtual void ScheduleBuySell()
         {
-            // Schedule a purchase of this contract tomorrow at 1AM
-            Schedule.On(DateRules.Tomorrow, TimeRules.At(1,0,0), () =>
+            // On daily resolution the order fills at the daily close, so a same-day buy + liquidate cannot work
+            // (the buy would not fill until after the liquidation). Buy on the first day with available data and
+            // liquidate the next day, once the purchase has filled at the previous close.
+            Schedule.On(DateRules.On(2020, 1, 7), TimeRules.At(10, 0, 0), () =>
             {
-                Ticket = MarketOrder(DcOption, 1);
+                Ticket = MarketOrder(ESOption, 1);
             });
-            
-            // Schedule liquidation tomorrow at 6PM
-            Schedule.On(DateRules.Tomorrow, TimeRules.At(18,0,0), () =>
+
+            Schedule.On(DateRules.On(2020, 1, 8), TimeRules.At(14, 0, 0), () =>
             {
                 Liquidate();
             });
@@ -82,27 +84,27 @@ namespace QuantConnect.Algorithm.CSharp
 
         public override void OnData(Slice slice)
         {
-            // Assert we are only getting data at 7PM (12AM UTC)
-            if (slice.Time.Hour != 19)
+            // Assert we are only getting data at 5PM NY, for ES future market closes at 17pm NY
+            if (slice.Time.Hour != 17)
             {
-                throw new ArgumentException($"Expected data at 7PM each day; instead was {slice.Time}");
+                throw new ArgumentException($"Expected data at 4PM each day; instead was {slice.Time}");
             }
         }
 
         /// <summary>
         /// Ran at the end of the algorithm to ensure the algorithm has no holdings
         /// </summary>
-        /// <exception cref="Exception">The algorithm has holdings</exception>
+        /// <exception cref="RegressionTestException">The algorithm has holdings</exception>
         public override void OnEndOfAlgorithm()
         {
             if (Portfolio.Invested)
             {
-                throw new Exception($"Expected no holdings at end of algorithm, but are invested in: {string.Join(", ", Portfolio.Keys)}");
+                throw new RegressionTestException($"Expected no holdings at end of algorithm, but are invested in: {string.Join(", ", Portfolio.Keys)}");
             }
-            
+
             if (Ticket.Status != OrderStatus.Filled)
             {
-                throw new Exception("Future option order failed to fill correctly");
+                throw new RegressionTestException("Future option order failed to fill correctly");
             }
         }
 
@@ -114,55 +116,56 @@ namespace QuantConnect.Algorithm.CSharp
         /// <summary>
         /// This is used by the regression test system to indicate which languages this algorithm is written in.
         /// </summary>
-        public virtual Language[] Languages { get; } = { Language.CSharp, Language.Python };
+        public virtual List<Language> Languages { get; } = new() { Language.CSharp, Language.Python };
+
+        /// <summary>
+        /// Data Points count of all timeslices of algorithm
+        /// </summary>
+        public virtual long DataPoints => 36;
+
+        /// <summary>
+        /// Data Points count of the algorithm history
+        /// </summary>
+        public virtual int AlgorithmHistoryDataPoints => 1;
+
+        /// <summary>
+        /// Final status of the algorithm
+        /// </summary>
+        public AlgorithmStatus AlgorithmStatus => AlgorithmStatus.Completed;
 
         /// <summary>
         /// This is used by the regression test system to indicate what the expected statistics are from running the algorithm
         /// </summary>
         public virtual Dictionary<string, string> ExpectedStatistics => new Dictionary<string, string>
         {
-            {"Total Trades", "2"},
-            {"Average Win", "0%"},
-            {"Average Loss", "-0.82%"},
-            {"Compounding Annual Return", "-66.089%"},
-            {"Drawdown", "0.800%"},
-            {"Expectancy", "-1"},
-            {"Net Profit", "-0.824%"},
-            {"Sharpe Ratio", "-6.993"},
+            {"Total Orders", "2"},
+            {"Average Win", "1.50%"},
+            {"Average Loss", "0%"},
+            {"Compounding Annual Return", "640.945%"},
+            {"Drawdown", "0.000%"},
+            {"Expectancy", "0"},
+            {"Start Equity", "100000"},
+            {"End Equity", "101497.16"},
+            {"Net Profit", "1.497%"},
+            {"Sharpe Ratio", "32.826"},
+            {"Sortino Ratio", "0"},
             {"Probabilistic Sharpe Ratio", "0%"},
-            {"Loss Rate", "100%"},
-            {"Win Rate", "0%"},
+            {"Loss Rate", "0%"},
+            {"Win Rate", "100%"},
             {"Profit-Loss Ratio", "0"},
-            {"Alpha", "0.466"},
-            {"Beta", "-7.501"},
-            {"Annual Standard Deviation", "0.092"},
-            {"Annual Variance", "0.009"},
-            {"Information Ratio", "-7.586"},
-            {"Tracking Error", "0.105"},
-            {"Treynor Ratio", "0.086"},
-            {"Total Fees", "$3.70"},
-            {"Estimated Strategy Capacity", "$0"},
-            {"Lowest Capacity Asset", "DC V5E8P9VAH3IC|DC V5E8P9SH0U0X"},
-            {"Fitness Score", "0.006"},
-            {"Kelly Criterion Estimate", "0"},
-            {"Kelly Criterion Probability Value", "0"},
-            {"Sortino Ratio", "79228162514264337593543950335"},
-            {"Return Over Maximum Drawdown", "-80.233"},
-            {"Portfolio Turnover", "0.013"},
-            {"Total Insights Generated", "0"},
-            {"Total Insights Closed", "0"},
-            {"Total Insights Analysis Completed", "0"},
-            {"Long Insight Count", "0"},
-            {"Short Insight Count", "0"},
-            {"Long/Short Ratio", "100%"},
-            {"Estimated Monthly Alpha Value", "$0"},
-            {"Total Accumulated Estimated Alpha Value", "$0"},
-            {"Mean Population Estimated Insight Value", "$0"},
-            {"Mean Population Direction", "0%"},
-            {"Mean Population Magnitude", "0%"},
-            {"Rolling Averaged Population Direction", "0%"},
-            {"Rolling Averaged Population Magnitude", "0%"},
-            {"OrderListHash", "f00013930ab4c104a6177485d8090b31"}
+            {"Alpha", "4.881"},
+            {"Beta", "1.842"},
+            {"Annual Standard Deviation", "0.168"},
+            {"Annual Variance", "0.028"},
+            {"Information Ratio", "67.238"},
+            {"Tracking Error", "0.077"},
+            {"Treynor Ratio", "3"},
+            {"Total Fees", "$2.84"},
+            {"Estimated Strategy Capacity", "$66000.00"},
+            {"Lowest Capacity Asset", "ES XCZJLCEYO5XG|ES XCZJLC9NOB29"},
+            {"Portfolio Turnover", "3.30%"},
+            {"Drawdown Recovery", "1"},
+            {"OrderListHash", "ca2b881524d4b9307e19a4f84ab4f5d7"}
         };
     }
 }

@@ -14,12 +14,7 @@
  *
 */
 
-using System;
 using System.Collections.Generic;
-using System.Linq;
-using QuantConnect.Data;
-using QuantConnect.Interfaces;
-using QuantConnect.Securities;
 
 namespace QuantConnect.Algorithm.CSharp
 {
@@ -31,66 +26,51 @@ namespace QuantConnect.Algorithm.CSharp
     /// <meta name="tag" content="futures" />
     public class BasicTemplateFuturesHourlyAlgorithm : BasicTemplateFuturesDailyAlgorithm
     {
-        private Symbol _contractSymbol;
         protected override Resolution Resolution => Resolution.Hour;
-
-        /// <summary>
-        /// This is used by the regression test system to indicate if the open source Lean repository has the required data to run this algorithm.
-        /// </summary>
-        public override bool CanRunLocally { get; } = true;
 
         /// <summary>
         /// This is used by the regression test system to indicate which languages this algorithm is written in.
         /// </summary>
-        public override Language[] Languages { get; } = { Language.CSharp, Language.Python };
+        public override List<Language> Languages { get; } = new() { Language.CSharp, Language.Python };
+
+        /// <summary>
+        /// Data Points count of all timeslices of algorithm
+        /// </summary>
+        public override long DataPoints => 25409;
 
         /// <summary>
         /// This is used by the regression test system to indicate what the expected statistics are from running the algorithm
         /// </summary>
         public override Dictionary<string, string> ExpectedStatistics => new Dictionary<string, string>
         {
-            {"Total Trades", "1988"},
-            {"Average Win", "0.01%"},
-            {"Average Loss", "0.00%"},
-            {"Compounding Annual Return", "-4.120%"},
-            {"Drawdown", "4.200%"},
-            {"Expectancy", "-0.870"},
-            {"Net Profit", "-4.150%"},
-            {"Sharpe Ratio", "-6.061"},
-            {"Probabilistic Sharpe Ratio", "0%"},
-            {"Loss Rate", "97%"},
-            {"Win Rate", "3%"},
-            {"Profit-Loss Ratio", "2.92"},
-            {"Alpha", "-0.027"},
-            {"Beta", "-0.006"},
+            {"Total Orders", "66"},
+            {"Average Win", "0.07%"},
+            {"Average Loss", "-0.04%"},
+            {"Compounding Annual Return", "0.296%"},
+            {"Drawdown", "0.300%"},
+            {"Expectancy", "0.213"},
+            {"Start Equity", "1000000"},
+            {"End Equity", "1002984.28"},
+            {"Net Profit", "0.298%"},
+            {"Sharpe Ratio", "-0.872"},
+            {"Sortino Ratio", "-0.342"},
+            {"Probabilistic Sharpe Ratio", "6.244%"},
+            {"Loss Rate", "53%"},
+            {"Win Rate", "47%"},
+            {"Profit-Loss Ratio", "1.59"},
+            {"Alpha", "-0.005"},
+            {"Beta", "-0.001"},
             {"Annual Standard Deviation", "0.005"},
             {"Annual Variance", "0"},
-            {"Information Ratio", "-1.66"},
+            {"Information Ratio", "-1.325"},
             {"Tracking Error", "0.089"},
-            {"Treynor Ratio", "4.919"},
-            {"Total Fees", "$3677.80"},
-            {"Estimated Strategy Capacity", "$2000.00"},
+            {"Treynor Ratio", "4.124"},
+            {"Total Fees", "$143.22"},
+            {"Estimated Strategy Capacity", "$13000000.00"},
             {"Lowest Capacity Asset", "ES VP274HSU1AF5"},
-            {"Fitness Score", "0.128"},
-            {"Kelly Criterion Estimate", "0"},
-            {"Kelly Criterion Probability Value", "0"},
-            {"Sortino Ratio", "-6.856"},
-            {"Return Over Maximum Drawdown", "-0.995"},
-            {"Portfolio Turnover", "0.648"},
-            {"Total Insights Generated", "0"},
-            {"Total Insights Closed", "0"},
-            {"Total Insights Analysis Completed", "0"},
-            {"Long Insight Count", "0"},
-            {"Short Insight Count", "0"},
-            {"Long/Short Ratio", "100%"},
-            {"Estimated Monthly Alpha Value", "$0"},
-            {"Total Accumulated Estimated Alpha Value", "$0"},
-            {"Mean Population Estimated Insight Value", "$0"},
-            {"Mean Population Direction", "0%"},
-            {"Mean Population Magnitude", "0%"},
-            {"Rolling Averaged Population Direction", "0%"},
-            {"Rolling Averaged Population Magnitude", "0%"},
-            {"OrderListHash", "87d2b127c9859cad9d2c65ac9d76deb5"}
+            {"Portfolio Turnover", "1.86%"},
+            {"Drawdown Recovery", "165"},
+            {"OrderListHash", "12f89a137598802c39e71ee4bfdb522b"}
         };
     }
 }

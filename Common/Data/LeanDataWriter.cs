@@ -15,17 +15,17 @@
 
 using System;
 using System.IO;
-using Ionic.Zip;
 using System.Linq;
 using System.Text;
 using QuantConnect.Util;
+using System.Globalization;
 using QuantConnect.Logging;
+using System.Threading.Tasks;
 using QuantConnect.Interfaces;
 using QuantConnect.Securities;
 using System.Collections.Generic;
-using System.Collections.Immutable;
-using System.Globalization;
-using System.Threading.Tasks;
+using QuantConnect.Configuration;
+using QuantConnect.Data.Auxiliary;
 
 namespace QuantConnect.Data
 {
@@ -34,10 +34,22 @@ namespace QuantConnect.Data
     /// </summary>
     public class LeanDataWriter
     {
+        private static KeyStringSynchronizer _keySynchronizer = new();
+
+        /// <summary>
+        /// The map file provider instance to use
+        /// </summary>
+        /// <remarks>Public for testing</remarks>
+        public static Lazy<IMapFileProvider> MapFileProvider { get; set; } = new(
+            Composer.Instance.GetExportedValueByTypeName<IMapFileProvider>(Config.Get("map-file-provider", "LocalDiskMapFileProvider"), forceTypeNameOnExisting: false)
+        );
+
         private readonly Symbol _symbol;
+        private readonly bool _mapSymbol;
         private readonly string _dataDirectory;
         private readonly TickType _tickType;
         private readonly Resolution _resolution;
+        private readonly WritePolicy _writePolicy;
         private readonly SecurityType _securityType;
         private readonly IDataCacheProvider _dataCacheProvider;
 
@@ -48,24 +60,32 @@ namespace QuantConnect.Data
         /// <param name="dataDirectory">Base data directory</param>
         /// <param name="resolution">Resolution of the desired output data</param>
         /// <param name="tickType">The tick type</param>
-        public LeanDataWriter(Resolution resolution, Symbol symbol, string dataDirectory, TickType tickType = TickType.Trade, IDataCacheProvider dataCacheProvider = null) : this(
+        /// <param name="dataCacheProvider">The data cache provider to use</param>
+        /// <param name="writePolicy">The file write policy to use</param>
+        /// <param name="mapSymbol">True if the symbol should be mapped while writting the data</param>
+        public LeanDataWriter(Resolution resolution, Symbol symbol, string dataDirectory, TickType tickType = TickType.Trade,
+            IDataCacheProvider dataCacheProvider = null, WritePolicy? writePolicy = null, bool mapSymbol = false) : this(
             dataDirectory,
             resolution,
             symbol.ID.SecurityType,
             tickType,
-            dataCacheProvider
+            dataCacheProvider,
+            writePolicy
         )
         {
             _symbol = symbol;
+            _mapSymbol = mapSymbol;
             // All fx data is quote data.
             if (_securityType == SecurityType.Forex || _securityType == SecurityType.Cfd)
             {
                 _tickType = TickType.Quote;
             }
 
-            if (_securityType != SecurityType.Equity && _securityType != SecurityType.Forex && _securityType != SecurityType.Cfd && _securityType != SecurityType.Crypto && _securityType != SecurityType.Future && _securityType != SecurityType.Option && _securityType != SecurityType.FutureOption && _securityType != SecurityType.Index && _securityType != SecurityType.IndexOption)
+            if (_securityType != SecurityType.Equity && _securityType != SecurityType.Forex && _securityType != SecurityType.Cfd && _securityType != SecurityType.Crypto
+                && _securityType != SecurityType.Future && _securityType != SecurityType.Option && _securityType != SecurityType.FutureOption
+                && _securityType != SecurityType.Index && _securityType != SecurityType.IndexOption && _securityType != SecurityType.CryptoFuture)
             {
-                throw new Exception("Sorry this security type is not yet supported by the LEAN data writer: " + _securityType);
+                throw new NotImplementedException("Sorry this security type is not yet supported by the LEAN data writer: " + _securityType);
             }
         }
 
@@ -76,12 +96,23 @@ namespace QuantConnect.Data
         /// <param name="resolution">Resolution of the desired output data</param>
         /// <param name="securityType">The security type</param>
         /// <param name="tickType">The tick type</param>
-        public LeanDataWriter(string dataDirectory, Resolution resolution, SecurityType securityType, TickType tickType, IDataCacheProvider dataCacheProvider = null)
+        /// <param name="dataCacheProvider">The data cache provider to use</param>
+        /// <param name="writePolicy">The file write policy to use</param>
+        public LeanDataWriter(string dataDirectory, Resolution resolution, SecurityType securityType, TickType tickType,
+            IDataCacheProvider dataCacheProvider = null, WritePolicy? writePolicy = null)
         {
             _dataDirectory = dataDirectory;
             _resolution = resolution;
             _securityType = securityType;
             _tickType = tickType;
+            if (writePolicy == null)
+            {
+                _writePolicy = resolution >= Resolution.Hour ? WritePolicy.Merge : WritePolicy.Overwrite;
+            }
+            else
+            {
+                _writePolicy = writePolicy.Value;
+            }
             _dataCacheProvider = dataCacheProvider ?? new DiskDataCacheProvider();
         }
 
@@ -93,7 +124,8 @@ namespace QuantConnect.Data
         {
             var lastTime = DateTime.MinValue;
             var outputFile = string.Empty;
-            var currentFileData = new List<(DateTime, string)>();
+            Symbol symbol = null;
+            var currentFileData = new List<TimedLine>();
             var writeTasks = new Queue<Task>();
 
             foreach (var data in source)
@@ -105,8 +137,10 @@ namespace QuantConnect.Data
                 // Only do this on date change, because we know we don't have a any data zips smaller than a day, saves time
                 if (data.Time.Date != lastTime.Date)
                 {
+                    var mappedSymbol = GetMappedSymbol(data.Time, data.Symbol);
                     // Get the latest file name, if it has changed, we have entered a new file, write our current data to file
-                    var latestOutputFile = GetZipOutputFileName(_dataDirectory, data.Time);
+                    var latestOutputFile = GetZipOutputFileName(_dataDirectory, data.Time, mappedSymbol);
+                    var latestSymbol = mappedSymbol;
                     if (outputFile.IsNullOrEmpty() || outputFile != latestOutputFile)
                     {
                         if (!currentFileData.IsNullOrEmpty())
@@ -114,21 +148,23 @@ namespace QuantConnect.Data
                             // Launch a write task for the current file and data set
                             var file = outputFile;
                             var fileData = currentFileData;
+                            var fileSymbol = symbol;
                             writeTasks.Enqueue(Task.Run(() =>
                             {
-                                WriteFile(file, fileData);
+                                WriteFile(file, fileData, fileSymbol);
                             }));
                         }
 
                         // Reset our dictionary and store new output file
-                        currentFileData = new List<(DateTime, string)>();
+                        currentFileData = new List<TimedLine>();
                         outputFile = latestOutputFile;
+                        symbol = latestSymbol;
                     }
                 }
 
                 // Add data to our current dictionary
                 var line = LeanData.GenerateLine(data, _securityType, _resolution);
-                currentFileData.Add((data.Time, line));
+                currentFileData.Add(new TimedLine(data.Time, line));
 
                 // Update our time
                 lastTime = data.Time;
@@ -137,10 +173,8 @@ namespace QuantConnect.Data
             // Finish off my processing the last file as well
             if (!currentFileData.IsNullOrEmpty())
             {
-                writeTasks.Enqueue(Task.Run(() =>
-                {
-                    WriteFile(outputFile, currentFileData);
-                }));
+                // we want to finish ASAP so let's do it ourselves
+                WriteFile(outputFile, currentFileData, symbol);
             }
 
             // Wait for all our write tasks to finish
@@ -209,15 +243,20 @@ namespace QuantConnect.Data
                     _tickType
                 );
 
-                var history = brokerage.GetHistory(historyRequest)
+                var history = brokerage.GetHistory(historyRequest)?
                     .Select(
                         x =>
                         {
                             // Convert to date timezone before we write it
                             x.Time = x.Time.ConvertTo(exchangeHours.TimeZone, dataTimeZone);
                             return x;
-                        })
+                        })?
                     .ToList();
+
+                if (history == null)
+                {
+                    continue;
+                }
 
                 // Generate a writer for this data and write it
                 var writer = new LeanDataWriter(_resolution, symbol, _dataDirectory, _tickType);
@@ -226,9 +265,9 @@ namespace QuantConnect.Data
         }
 
         /// <summary>
-        /// Loads an existing hourly or daily Lean zip file into a SortedDictionary
+        /// Loads an existing Lean zip file into a SortedDictionary
         /// </summary>
-        protected virtual bool TryLoadFile(string fileName, string entryName, out SortedDictionary<DateTime, string> rows)
+        private bool TryLoadFile(string fileName, string entryName, DateTime date, out SortedDictionary<DateTime, string> rows)
         {
             rows = new SortedDictionary<DateTime, string>();
 
@@ -244,8 +283,7 @@ namespace QuantConnect.Data
                     string line;
                     while ((line = reader.ReadLine()) != null)
                     {
-                        var time = DateTime.ParseExact(line.AsSpan(0, DateFormat.TwelveCharacter.Length), DateFormat.TwelveCharacter, CultureInfo.InvariantCulture);
-                        rows[time] = line;
+                        rows[LeanData.ParseTime(line, date.Date, _resolution)] = line;
                     }
                 }
 
@@ -258,53 +296,79 @@ namespace QuantConnect.Data
         /// </summary>
         /// <param name="filePath">The full path to the new file</param>
         /// <param name="data">The data to write as a list of dates and strings</param>
+        /// <param name="symbol">The symbol associated with this data</param>
         /// <remarks>The reason we have the data as IEnumerable(DateTime, string) is to support
         /// a generic write that works for all resolutions. In order to merge in hour/daily case I need the
         /// date of the data to correctly merge the two. In order to support writing ticks I need to allow
         /// two data points to have the same time. Thus I cannot use a single list of just strings nor
         /// a sorted dictionary of DateTimes and strings. </remarks>
-        private void WriteFile(string filePath, List<(DateTime, string)> data)
+        private void WriteFile(string filePath, List<TimedLine> data, Symbol symbol)
         {
+            filePath = FileExtension.ToNormalizedPath(filePath);
             if (data == null || data.Count == 0)
             {
                 return;
             }
-            // Generate this csv entry name
-            var entryName = LeanData.GenerateZipEntryName(_symbol, data[0].Item1, _resolution, _tickType);
-            
-            // Check disk once for this file ahead of time, reuse where possible
-            var fileExists = File.Exists(filePath);
 
-            // Handle merging of files
-            // Only merge on files with hour/daily resolution, that exist, and can be loaded
-            string finalData;
-            if (_resolution >= Resolution.Hour && fileExists && TryLoadFile(filePath, entryName, out var rows))
+            // because we read & write the same file we need to take a lock per file path so we don't read something that might get outdated
+            // by someone writting to the same path at the same time
+            _keySynchronizer.Execute(filePath, singleExecution: false, () =>
             {
-                // Preform merge on loaded rows
-                foreach (var (time, line) in data)
+                var date = data[0].Time.Date;
+                // Generate this csv entry name
+                var entryName = LeanData.GenerateZipEntryName(symbol, date, _resolution, _tickType);
+
+                // Check disk once for this file ahead of time, reuse where possible
+                var fileExists = File.Exists(filePath);
+
+                // If our file doesn't exist its possible the directory doesn't exist, make sure at least the directory exists
+                if (!fileExists)
                 {
-                    rows[time] = line;
+                    Directory.CreateDirectory(Path.GetDirectoryName(filePath));
                 }
 
-                // Final merged data product
-                finalData = string.Join("\n", rows.Values);
-            }
-            else
-            {
-                // Otherwise just extract the data from the given list.
-                finalData = string.Join("\n", data.Select(x => x.Item2));
-            }
+                // Handle merging of files
+                // Only merge on files with hour/daily resolution, that exist, and can be loaded
+                string finalData = null;
+                if (_writePolicy == WritePolicy.Append)
+                {
+                    var streamWriter = new ZipStreamWriter(filePath, entryName);
+                    foreach (var tuple in data)
+                    {
+                        streamWriter.WriteLine(tuple.Line);
+                    }
+                    streamWriter.DisposeSafely();
+                }
+                else if (_writePolicy == WritePolicy.Merge && fileExists && TryLoadFile(filePath, entryName, date, out var rows))
+                {
+                    // Preform merge on loaded rows
+                    foreach (var timedLine in data)
+                    {
+                        rows[timedLine.Time] = timedLine.Line;
+                    }
 
-            // If our file doesn't exist its possible the directory doesn't exist, make sure at least the directory exists
-            if (!fileExists)
-            {
-                Directory.CreateDirectory(Path.GetDirectoryName(filePath));
-            }
+                    // Final merged data product
+                    finalData = string.Join("\n", rows.Values);
+                }
+                else
+                {
+                    // Otherwise just extract the data from the given list.
+                    finalData = string.Join("\n", data.Select(x => x.Line));
+                }
 
-            var bytes = Encoding.UTF8.GetBytes(finalData);
-            _dataCacheProvider.Store($"{filePath}#{entryName}", bytes);
+                if (finalData != null)
+                {
+                    var bytes = Encoding.UTF8.GetBytes(finalData);
+                    _dataCacheProvider.Store($"{filePath}#{entryName}", bytes);
+                }
 
-            Log.Debug($"LeanDataWriter.Write(): Appended: {filePath} @ {entryName}");
+                if (Log.DebuggingEnabled)
+                {
+                    var from = date.ToString(DateFormat.EightCharacter, CultureInfo.InvariantCulture);
+                    var to = data[data.Count - 1].Time.Date.ToString(DateFormat.EightCharacter, CultureInfo.InvariantCulture);
+                    Log.Debug($"LeanDataWriter.Write({symbol.ID}): Appended: {filePath} @ {entryName} {from}->{to}");
+                }
+            });
         }
 
         /// <summary>
@@ -312,11 +376,46 @@ namespace QuantConnect.Data
         /// </summary>
         /// <param name="baseDirectory">Base output directory for the zip file</param>
         /// <param name="time">Date/time for the data we're writing</param>
+        /// <param name="symbol">The associated symbol. For example for options/futures it will be different than the canonical at <see cref="_symbol"/></param>
         /// <returns>The full path to the output zip file</returns>
-        private string GetZipOutputFileName(string baseDirectory, DateTime time)
+        private string GetZipOutputFileName(string baseDirectory, DateTime time, Symbol symbol)
         {
-            return LeanData.GenerateZipFilePath(baseDirectory, _symbol, time, _resolution, _tickType);
+            return LeanData.GenerateZipFilePath(baseDirectory, symbol, time, _resolution, _tickType);
         }
 
+        /// <summary>
+        /// Helper method to map a symbol if required at the given date
+        /// </summary>
+        private Symbol GetMappedSymbol(DateTime time, Symbol symbol)
+        {
+            if (!_mapSymbol)
+            {
+                return _symbol;
+            }
+            if (symbol.RequiresMapping())
+            {
+                var mapFileResolver = MapFileProvider.Value.Get(AuxiliaryDataKey.Create(symbol.ID));
+                var mapFile = mapFileResolver.ResolveMapFile(symbol);
+                var mappedTicker = mapFile.GetMappedSymbol(time);
+                if(!string.IsNullOrEmpty(mappedTicker))
+                {
+                    // only update if we got something to map to
+                    symbol = symbol.UpdateMappedSymbol(mappedTicker);
+                }
+            }
+
+            return symbol;
+        }
+
+        private class TimedLine
+        {
+            public string Line { get; }
+            public DateTime Time { get; }
+            public TimedLine(DateTime time, string line)
+            {
+                Line = line;
+                Time = time;
+            }
+        }
     }
 }

@@ -16,7 +16,14 @@
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.IO;
 using System.Linq;
+using System.Net;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
+using Moq;
+using Moq.Protected;
 using Newtonsoft.Json;
 using NodaTime;
 using NUnit.Framework;
@@ -25,7 +32,8 @@ using QuantConnect.Algorithm;
 using QuantConnect.Algorithm.CSharp;
 using QuantConnect.Algorithm.Framework.Alphas;
 using QuantConnect.Data;
-using QuantConnect.Data.Custom.AlphaStreams;
+using QuantConnect.Data.Auxiliary;
+using QuantConnect.Data.Fundamental;
 using QuantConnect.Data.Market;
 using QuantConnect.Data.UniverseSelection;
 using QuantConnect.Indicators;
@@ -34,14 +42,359 @@ using QuantConnect.Lean.Engine.HistoricalData;
 using QuantConnect.Orders;
 using QuantConnect.Orders.Fees;
 using QuantConnect.Packets;
+using QuantConnect.Python;
 using QuantConnect.Scheduling;
 using QuantConnect.Securities;
+using QuantConnect.Tests.Brokerages;
+using QuantConnect.Util;
 
 namespace QuantConnect.Tests.Common.Util
 {
     [TestFixture]
     public class ExtensionsTests
     {
+        [TestCase("00000001", TradeConditionFlags.Regular)]
+        [TestCase("20000021", TradeConditionFlags.Regular, TradeConditionFlags.IntermarketSweep, TradeConditionFlags.TradeThroughExempt)]
+        public void GetEnumValuesInValue(string saleCondition, params TradeConditionFlags[] expected)
+        {
+            var parsed = uint.Parse(saleCondition, NumberStyles.HexNumber, CultureInfo.InvariantCulture);
+            var enums = Extensions.GetFlags<TradeConditionFlags>(parsed).ToArray();
+            Assert.AreEqual(expected, enums);
+        }
+
+        [TestCase(Market.CME, DataMappingMode.OpenInterest, DataMappingMode.OpenInterest)]
+        [TestCase(Market.CME, DataMappingMode.OpenInterestAnnual, DataMappingMode.OpenInterestAnnual)]
+        [TestCase(Market.EUREX, DataMappingMode.OpenInterest, DataMappingMode.LastTradingDay)]
+        [TestCase(Market.HKFE, DataMappingMode.OpenInterest, DataMappingMode.LastTradingDay)]
+        [TestCase(Market.ICE, DataMappingMode.OpenInterest, DataMappingMode.LastTradingDay)]
+        [TestCase(Market.KRX, DataMappingMode.OpenInterest, DataMappingMode.LastTradingDay)]
+        [TestCase(Market.KRX, DataMappingMode.OpenInterestAnnual, DataMappingMode.LastTradingDay)]
+        [TestCase(Market.KRX, DataMappingMode.FirstDayMonth, DataMappingMode.FirstDayMonth)]
+        public void GetUniverseMappingModeOrDefault(string market, DataMappingMode settingsMode, DataMappingMode expected)
+        {
+            var settings = new UniverseSettings(Resolution.Daily, 1, true, false, TimeSpan.Zero) { DataMappingMode = settingsMode };
+
+            Assert.AreEqual(expected, settings.GetUniverseMappingModeOrDefault(SecurityType.Future, market));
+        }
+
+        [TestCase("tt", "", "tt")]
+        [TestCase("tt", "t", "t")]
+        [TestCase("tt", "tt", "")]
+        [TestCase("tt", "asda", "tt")]
+        [TestCase("tt", "1", "tt")]
+        public void RemoveFromEnd(string input, string removal, string expected)
+        {
+            Assert.AreEqual(expected, input.RemoveFromEnd(removal));
+        }
+
+        [TestCase("A test", 1)]
+        [TestCase("[\"A test\"]", 1)]
+        [TestCase("[\"A test\", \"something else\"]", 2)]
+        public void DeserializeList(string input, int count)
+        {
+            var result = input.DeserializeList();
+            Assert.AreEqual(count, result.Count);
+            Assert.AreEqual("A test", result[0]);
+            if (count == 2)
+            {
+                Assert.AreEqual("something else", result[1]);
+            }
+        }
+
+        private class DeserializeListObject { public int Property { get; set; } }
+        [TestCase("{ \"property\": 10}", 1)]
+        [TestCase("[{ \"property\": 10}]", 1)]
+        [TestCase("[{ \"property\": 10}, { \"property\": 20 }]", 2)]
+        public void DeserializeObjectList(string input, int count)
+        {
+            var result = input.DeserializeList<DeserializeListObject>();
+            Assert.AreEqual(count, result.Count);
+            Assert.AreEqual(10, result[0].Property);
+            if (count == 2)
+            {
+                Assert.AreEqual(20, result[1].Property);
+            }
+        }
+
+        [TestCase(true)]
+        [TestCase(false)]
+        public void ConvertPythonSymbolEnumerableSingle(bool useSymbol)
+        {
+            using (Py.GIL())
+            {
+                PyObject source = null;
+                if (useSymbol)
+                {
+                    source = Symbols.SPY.ToPython();
+                }
+                else
+                {
+                    SymbolCache.Set("SPY", Symbols.SPY);
+                    source = "SPY".ToPython();
+                }
+                var enumerable = source.ConvertToSymbolEnumerable();
+                for (var i = 0; i < 2; i++)
+                {
+                    var symbols = enumerable.ToList();
+                    Assert.AreEqual(1, symbols.Count);
+                    Assert.AreEqual(Symbols.SPY, symbols[0]);
+                }
+                source.Dispose();
+            }
+        }
+
+        [TestCase("pylist")]
+        [TestCase("pyiterable")]
+        [TestCase("csharp")]
+        public void ConvertPythonSymbolEnumerablePyList(string testCase)
+        {
+            using (Py.GIL())
+            {
+                PyObject source = null;
+                if (testCase == "csharp")
+                {
+                    source = (new[] { Symbols.SPY, Symbols.AAPL }).ToPython();
+                }
+                else if (testCase == "pylist")
+                {
+                    source = new PyList((new[] { Symbols.SPY.ToPython(), Symbols.AAPL.ToPython() }));
+                }
+                else
+                {
+                    source = new PyIterable((new[] { Symbols.SPY, Symbols.AAPL }).ToPython());
+                }
+                var enumerable = source.ConvertToSymbolEnumerable();
+                for (var i = 0; i < 2; i++)
+                {
+                    var symbols = enumerable.ToList();
+                    Assert.AreEqual(2, symbols.Count);
+                    Assert.AreEqual(Symbols.SPY, symbols[0]);
+                    Assert.AreEqual(Symbols.AAPL, symbols[1]);
+                }
+                source.Dispose();
+            }
+        }
+
+        [Test]
+        public void ConvertPythonSymbolEnumerableCSharp()
+        {
+            using (Py.GIL())
+            {
+                using var source = (new[] { Symbols.SPY, Symbols.AAPL }).ToPython();
+                var enumerable = source.ConvertToSymbolEnumerable();
+                for (var i = 0; i < 2; i++)
+                {
+                    var symbols = enumerable.ToList();
+                    Assert.AreEqual(2, symbols.Count);
+                    Assert.AreEqual(Symbols.SPY, symbols[0]);
+                    Assert.AreEqual(Symbols.AAPL, symbols[1]);
+                }
+            }
+        }
+
+        [Test]
+        public void NonExistingEmptyDirectory()
+        {
+            var nonexistingDirectory = $"NonExistingEmptyDirectory-{new Guid()}";
+            Assert.IsTrue(nonexistingDirectory.IsDirectoryEmpty());
+        }
+
+        [Test]
+        public void EmptyDirectory()
+        {
+            var directory = $"EmptyDirectory-{new Guid()}";
+            Directory.CreateDirectory(directory);
+            Assert.IsTrue(directory.IsDirectoryEmpty());
+
+            Directory.Delete(directory, true);
+        }
+
+        [Test]
+        public void DirectoryWithFile()
+        {
+            var directory = $"DirectoryWithFile-{new Guid()}";
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(Path.Combine(directory, "test"), "test");
+
+            Assert.IsFalse(directory.IsDirectoryEmpty());
+
+            Directory.Delete(directory, true);
+        }
+
+        [Test]
+        public void DirectoryWithDirectory()
+        {
+            var directory = $"DirectoryWithDirectory-{new Guid()}";
+            Directory.CreateDirectory(directory);
+            Directory.CreateDirectory(Path.Combine(directory, "test"));
+
+            Assert.IsFalse(directory.IsDirectoryEmpty());
+
+            Directory.Delete(directory, true);
+        }
+
+        [Test]
+        public void EmptyDirectoryCached()
+        {
+            var directory = $"EmptyDirectoryCached-{new Guid()}";
+            Directory.CreateDirectory(directory);
+
+            Assert.IsTrue(directory.IsDirectoryEmpty());
+
+            File.WriteAllText(Path.Combine(directory, "test"), "test");
+
+            Assert.IsTrue(directory.IsDirectoryEmpty());
+
+            Directory.Delete(directory, true);
+        }
+
+        [Test]
+        public void ToMD5()
+        {
+            var result = "pinochopinochopino   ".ToMD5();
+            Assert.AreEqual("261db8a511d4c433fe58f8b9870fc88e", result);
+        }
+
+        [Test]
+        public void ToSha256()
+        {
+            var result = "pinochopinochopino   ".ToSHA256();
+            Assert.AreEqual("327a5a3b33aef00daf26e414542e12bf4205adb716475fa22e53a178e5d8baca", result);
+        }
+
+        [TestCase("1000", 0)]
+        [TestCase("0", 0)]
+        [TestCase("1", 0)]
+        [TestCase("1.0", 1)]
+        [TestCase("0.01", 2)]
+        [TestCase("0.001", 3)]
+        [TestCase("0.0001", 4)]
+        [TestCase("0.00001", 5)]
+        [TestCase("0.000001", 6)]
+        public void GetDecimalPlaces(string decimalInput, int expectedResult)
+        {
+            var value = decimal.Parse(decimalInput, NumberStyles.Any, CultureInfo.InvariantCulture);
+            Assert.AreEqual(expectedResult, value.GetDecimalPlaces());
+        }
+
+        [TestCase(0, 10, 110)]
+        [TestCase(900, 10, 110)]
+        [TestCase(500, 10, 10)]
+
+        [TestCase(0, 100, 100)]
+        [TestCase(100, 100, 100)]
+        [TestCase(500, 100, 100)]
+        [TestCase(990, 100, 200)]
+        [TestCase(900, 100, 200)]
+
+        [TestCase(0, 1000, 1500)]
+        [TestCase(100, 1000, 1000)]
+        [TestCase(500, 1000, 1000)]
+        [TestCase(990, 1000, 1500)]
+
+        [TestCase(0, 10000, 10500)]
+        [TestCase(100, 10000, 10000)]
+        [TestCase(500, 10000, 10000)]
+        [TestCase(990, 10000, 10500)]
+        public void UnevenSecondWaitTime(int nowMilliseconds, int waitInterval, int expectedWaitInterval)
+        {
+            var nowUtc = new DateTime(2022, 04, 1);
+            nowUtc = nowUtc.AddMilliseconds(nowMilliseconds);
+
+            Assert.AreEqual(expectedWaitInterval, nowUtc.GetSecondUnevenWait(waitInterval));
+        }
+
+        [TestCase(SecurityType.Cfd, "20501231", false)]
+        [TestCase(SecurityType.Equity, "20501231", false)]
+        [TestCase(SecurityType.Base, "20501231", false)]
+        [TestCase(SecurityType.Forex, "20501231", false)]
+        [TestCase(SecurityType.Crypto, "20501231", false)]
+        [TestCase(SecurityType.Index, "20501231", false)]
+
+        [TestCase(SecurityType.Option, null, false)]
+        [TestCase(SecurityType.Future, null, false)]
+        [TestCase(SecurityType.FutureOption, null, false)]
+        [TestCase(SecurityType.IndexOption, null, false)]
+
+        [TestCase(SecurityType.Option, "20501231", true)]
+        [TestCase(SecurityType.Future, "20501231", true)]
+        [TestCase(SecurityType.FutureOption, "20501231", true)]
+        [TestCase(SecurityType.IndexOption, "20501231", true)]
+        public void GetDelistingDate(SecurityType securityType, string expectedExpiration, bool isChain)
+        {
+            Symbol symbol = null;
+
+            switch (securityType)
+            {
+                case SecurityType.Base:
+                    symbol = Symbol.CreateBase(typeof(IndexedBaseData), Symbols.AAPL, Market.USA);
+                    break;
+                case SecurityType.Equity:
+                    symbol = Symbols.AAPL;
+                    break;
+                case SecurityType.Option:
+                    symbol = Symbols.SPY_C_192_Feb19_2016;
+                    if (isChain)
+                    {
+                        symbol = symbol.Canonical;
+                    }
+                    else
+                    {
+                        expectedExpiration = symbol.ID.Date.ToString(DateFormat.EightCharacter, CultureInfo.InvariantCulture);
+                    }
+                    break;
+                case SecurityType.Forex:
+                    symbol = Symbols.EURUSD;
+                    break;
+                case SecurityType.Future:
+                    symbol = Symbols.Fut_SPY_Feb19_2016;
+                    if (isChain)
+                    {
+                        symbol = symbol.Canonical;
+                    }
+                    else
+                    {
+                        expectedExpiration = symbol.ID.Date.ToString(DateFormat.EightCharacter, CultureInfo.InvariantCulture);
+                    }
+                    break;
+                case SecurityType.Cfd:
+                    symbol = Symbols.DE30EUR;
+                    break;
+                case SecurityType.Crypto:
+                    symbol = Symbols.BTCEUR;
+                    break;
+                case SecurityType.FutureOption:
+                    symbol = Symbols.CreateFutureOptionSymbol(Symbols.Fut_SPY_Feb19_2016, OptionRight.Call, 10, new DateTime(2022, 05, 01));
+                    if (isChain)
+                    {
+                        symbol = symbol.Canonical;
+                    }
+                    else
+                    {
+                        expectedExpiration = symbol.ID.Date.ToString(DateFormat.EightCharacter, CultureInfo.InvariantCulture);
+                    }
+                    break;
+                case SecurityType.Index:
+                    symbol = Symbols.SPX;
+                    break;
+                case SecurityType.IndexOption:
+                    symbol = Symbol.CreateOption(Symbols.SPX, Symbols.SPX.ID.Market, OptionStyle.European, OptionRight.Call, 1, new DateTime(2022, 05, 02));
+                    if (isChain)
+                    {
+                        symbol = symbol.Canonical;
+                    }
+                    else
+                    {
+                        expectedExpiration = symbol.ID.Date.ToString(DateFormat.EightCharacter, CultureInfo.InvariantCulture);
+                    }
+                    break;
+                default:
+                    break;
+            }
+            var mapFile = TestGlobals.MapFileProvider.Get(AuxiliaryDataKey.Create(symbol)).ResolveMapFile(symbol);
+            Assert.AreEqual(Time.ParseDate(expectedExpiration), symbol.GetDelistingDate(mapFile));
+        }
+
         [TestCase("20220101", false, true, Resolution.Daily)]
         [TestCase("20220101", false, false, Resolution.Daily)]
         [TestCase("20220103 09:31", true, false, Resolution.Minute)]
@@ -92,6 +445,17 @@ namespace QuantConnect.Tests.Common.Util
             Assert.Greater(nextNextExpiration.ID.Date, nextExpiration.ID.Date);
         }
 
+        [TestCase("MDTUSD XJ")]
+        [TestCase("BTCEUR XJ")]
+        [TestCase("BTCUSDC XJ")]
+        [TestCase("BTCUSDT XJ")]
+        public void GDAXMarketNameCompatibilityWithCoinbase(string gdaxTicker)
+        {
+            var sid = SecurityIdentifier.Parse(gdaxTicker);
+
+            Assert.AreEqual(Market.Coinbase, sid.Market);
+        }
+
         [TestCase("A", "a")]
         [TestCase("", "")]
         [TestCase(null, null)]
@@ -105,7 +469,7 @@ namespace QuantConnect.Tests.Common.Util
         [Test]
         public void BatchAlphaResultPacket()
         {
-            var btcusd = Symbol.Create("BTCUSD", SecurityType.Crypto, Market.GDAX);
+            var btcusd = Symbol.Create("BTCUSD", SecurityType.Crypto, Market.Coinbase);
             var insights = new List<Insight>
             {
                 new Insight(DateTime.UtcNow, btcusd, Time.OneMillisecond, InsightType.Price, InsightDirection.Up, 1, 2, "sourceModel1"),
@@ -118,16 +482,15 @@ namespace QuantConnect.Tests.Common.Util
             };
             var orders = new List<Order> { new MarketOrder(btcusd, 1000, DateTime.UtcNow, "ExpensiveOrder") { Id = 1 } };
 
-            var packet1 = new AlphaResultPacket("1", 1, insights: insights, portfolio: new AlphaStreamsPortfolioState { TotalPortfolioValue = 11 });
+            var packet1 = new AlphaResultPacket("1", 1, insights: insights);
             var packet2 = new AlphaResultPacket("1", 1, orders: orders);
-            var packet3 = new AlphaResultPacket("1", 1, orderEvents: orderEvents, portfolio: new AlphaStreamsPortfolioState { TotalPortfolioValue = 12 });
+            var packet3 = new AlphaResultPacket("1", 1, orderEvents: orderEvents);
 
             var result = new List<AlphaResultPacket> { packet1, packet2, packet3 }.Batch();
 
             Assert.AreEqual(2, result.Insights.Count);
             Assert.AreEqual(2, result.OrderEvents.Count);
             Assert.AreEqual(1, result.Orders.Count);
-            Assert.AreEqual(12, result.Portfolio.TotalPortfolioValue);
 
             Assert.IsTrue(result.Insights.SequenceEqual(insights));
             Assert.IsTrue(result.OrderEvents.SequenceEqual(orderEvents));
@@ -139,7 +502,7 @@ namespace QuantConnect.Tests.Common.Util
         [Test]
         public void BatchAlphaResultPacketDuplicateOrder()
         {
-            var btcusd = Symbol.Create("BTCUSD", SecurityType.Crypto, Market.GDAX);
+            var btcusd = Symbol.Create("BTCUSD", SecurityType.Crypto, Market.Coinbase);
             var orders = new List<Order>
             {
                 new MarketOrder(btcusd, 1000, DateTime.UtcNow, "ExpensiveOrder") { Id = 1 },
@@ -173,7 +536,7 @@ namespace QuantConnect.Tests.Common.Util
         public void SeriesIsNotEmpty()
         {
             var series = new Series("SadSeries")
-                { Values = new List<ChartPoint> { new ChartPoint(1, 1) } };
+            { Values = new List<ISeriesPoint> { new ChartPoint(1, 1) } };
 
             Assert.IsFalse(series.IsEmpty());
         }
@@ -194,17 +557,17 @@ namespace QuantConnect.Tests.Common.Util
         public void ChartIsEmptyWithEmptySeries()
         {
             Assert.IsTrue((new Chart("HappyChart")
-                { Series = new Dictionary<string, Series> { { "SadSeries", new Series("SadSeries") } }}).IsEmpty());
+            { Series = new Dictionary<string, BaseSeries> { { "SadSeries", new Series("SadSeries") } } }).IsEmpty());
         }
 
         [Test]
         public void ChartIsNotEmptyWithNonEmptySeries()
         {
             var series = new Series("SadSeries")
-                { Values = new List<ChartPoint> { new ChartPoint(1, 1) } };
+            { Values = new List<ISeriesPoint> { new ChartPoint(1, 1) } };
 
             Assert.IsFalse((new Chart("HappyChart")
-                { Series = new Dictionary<string, Series> { { "SadSeries", series } } }).IsEmpty());
+            { Series = new Dictionary<string, BaseSeries> { { "SadSeries", series } } }).IsEmpty());
         }
 
         [Test]
@@ -238,7 +601,7 @@ namespace QuantConnect.Tests.Common.Util
         [Test]
         public void GetBetterTypeNameHandlesRecursiveGenericTypes()
         {
-            var type = typeof (Dictionary<List<int>, Dictionary<int, string>>);
+            var type = typeof(Dictionary<List<int>, Dictionary<int, string>>);
             const string expected = "Dictionary<List<Int32>, Dictionary<Int32, String>>";
             var actual = type.GetBetterTypeName();
             Assert.AreEqual(expected, actual);
@@ -327,7 +690,7 @@ namespace QuantConnect.Tests.Common.Util
         {
             var time = new DateTime(2014, 3, 9, 2, 0, 1);
             var expected = new DateTime(2014, 3, 9, 2, 0, 0);
-            var hours = MarketHoursDatabase.FromDataFolder().GetExchangeHours(Market.GDAX, null, SecurityType.Crypto);
+            var hours = MarketHoursDatabase.FromDataFolder().GetExchangeHours(Market.Coinbase, null, SecurityType.Crypto);
             var exchangeRounded = time.ExchangeRoundDownInTimeZone(Time.OneHour, hours, TimeZones.Utc, true);
             Assert.AreEqual(expected, exchangeRounded);
         }
@@ -337,9 +700,34 @@ namespace QuantConnect.Tests.Common.Util
         {
             var time = new DateTime(2014, 11, 2, 2, 0, 1);
             var expected = new DateTime(2014, 11, 2, 2, 0, 0);
-            var hours = MarketHoursDatabase.FromDataFolder().GetExchangeHours(Market.GDAX, null, SecurityType.Crypto);
+            var hours = MarketHoursDatabase.FromDataFolder().GetExchangeHours(Market.Coinbase, null, SecurityType.Crypto);
             var exchangeRounded = time.ExchangeRoundDownInTimeZone(Time.OneHour, hours, TimeZones.Utc, true);
             Assert.AreEqual(expected, exchangeRounded);
+        }
+
+        [Test]
+        // We assert the behavior of noda time convert to utc around daylight saving start and end
+        // Even though start and end un exchange TZ are 1.01:00:00 long (1 day & 1 hour) in utc it's always 1 day
+        public void ConvertToUtcAndDayLightSavings()
+        {
+            {
+                // day light savings starts
+                var start = new DateTime(2011, 3, 12, 19, 0, 0);
+                var end = new DateTime(2011, 3, 13, 20, 0, 0);
+
+                var utcStart = start.ConvertToUtc(TimeZones.NewYork);
+                var utcEnd = end.ConvertToUtc(TimeZones.NewYork);
+                Assert.AreEqual(Time.OneDay, utcEnd - utcStart);
+            }
+            {
+                // day light savings ends
+                var start = new DateTime(2011, 11, 5, 20, 0, 0);
+                var end = new DateTime(2011, 11, 6, 19, 0, 0);
+
+                var utcStart = start.ConvertToUtc(TimeZones.NewYork);
+                var utcEnd = end.ConvertToUtc(TimeZones.NewYork);
+                Assert.AreEqual(Time.OneDay, utcEnd - utcStart);
+            }
         }
 
         [Test]
@@ -431,7 +819,7 @@ namespace QuantConnect.Tests.Common.Util
         {
             var time = new DateTime(2014, 3, 9, 2, 0, 1);
             var expected = new DateTime(2014, 3, 9, 2, 0, 0);
-            var hours = MarketHoursDatabase.FromDataFolder().GetExchangeHours(Market.GDAX, null, SecurityType.Crypto);
+            var hours = MarketHoursDatabase.FromDataFolder().GetExchangeHours(Market.Coinbase, null, SecurityType.Crypto);
             var exchangeRounded = time.ExchangeRoundDownInTimeZone(Time.OneHour, hours, TimeZones.NewYork, true);
             Assert.AreEqual(expected, exchangeRounded);
         }
@@ -441,7 +829,7 @@ namespace QuantConnect.Tests.Common.Util
         {
             var time = new DateTime(2014, 11, 2, 2, 0, 1);
             var expected = new DateTime(2014, 11, 2, 2, 0, 0);
-            var hours = MarketHoursDatabase.FromDataFolder().GetExchangeHours(Market.GDAX, null, SecurityType.Crypto);
+            var hours = MarketHoursDatabase.FromDataFolder().GetExchangeHours(Market.Coinbase, null, SecurityType.Crypto);
             var exchangeRounded = time.ExchangeRoundDownInTimeZone(Time.OneHour, hours, TimeZones.NewYork, true);
             Assert.AreEqual(expected, exchangeRounded);
         }
@@ -682,7 +1070,7 @@ namespace QuantConnect.Tests.Common.Util
         [Test]
         public void ConvertsDictionaryFromString()
         {
-            var expected = new Dictionary<string, int> {{"a", 1}, {"b", 2}};
+            var expected = new Dictionary<string, int> { { "a", 1 }, { "b", 2 } };
             var input = JsonConvert.SerializeObject(expected);
             var actual = input.ConvertTo<Dictionary<string, int>>();
             CollectionAssert.AreEqual(expected, actual);
@@ -692,8 +1080,8 @@ namespace QuantConnect.Tests.Common.Util
         public void DictionaryAddsItemToExistsList()
         {
             const int key = 0;
-            var list = new List<int> {1, 2};
-            var dictionary = new Dictionary<int, List<int>> {{key, list}};
+            var list = new List<int> { 1, 2 };
+            var dictionary = new Dictionary<int, List<int>> { { key, list } };
             Extensions.Add(dictionary, key, 3);
             Assert.AreEqual(3, list.Count);
             Assert.AreEqual(3, list[2]);
@@ -722,7 +1110,7 @@ namespace QuantConnect.Tests.Common.Util
         [Test]
         public void SafeDecimalCastRespectsUpperBound()
         {
-            var input = (double) decimal.MaxValue;
+            var input = (double)decimal.MaxValue;
             var output = input.SafeDecimalCast();
             Assert.AreEqual(decimal.MaxValue, output);
         }
@@ -730,7 +1118,7 @@ namespace QuantConnect.Tests.Common.Util
         [Test]
         public void SafeDecimalCastRespectsLowerBound()
         {
-            var input = (double) decimal.MinValue;
+            var input = (double)decimal.MinValue;
             var output = input.SafeDecimalCast();
             Assert.AreEqual(decimal.MinValue, output);
         }
@@ -765,6 +1153,16 @@ namespace QuantConnect.Tests.Common.Util
         {
             var output = input.Normalize();
             Assert.AreEqual(expectedOutput, output.ToStringInvariant());
+        }
+
+        [TestCase(0.072842, "0.072842")]
+        [TestCase(7.5819999, "7.58")]
+        [TestCase(54.1119999, "54.1")]
+        [TestCase(1152280.01234568423, "1152280")]
+        public void SmartRoundingShort(decimal input, string expectedOutput)
+        {
+            var output = input.SmartRoundingShort().ToStringInvariant();
+            Assert.AreEqual(expectedOutput, output);
         }
 
         [Test]
@@ -892,7 +1290,7 @@ namespace QuantConnect.Tests.Common.Util
             using (Py.GIL())
             {
                 // Try to convert a python class which inherits from a C# object
-                value = PythonEngine.ModuleFromString("testModule",
+                value = PyModule.FromString("testModule",
                     @"
 from AlgorithmImports import *
 
@@ -909,18 +1307,18 @@ class Test(PythonData):
         [Test]
         public void PyObjectTryConvertSymbolArray()
         {
-            PyObject value;
             using (Py.GIL())
             {
                 // Wrap a Symbol Array around a PyObject and convert it back
-                value = new PyList(new[] { Symbols.SPY.ToPython(), Symbols.AAPL.ToPython() });
-            }
+                using PyObject value = new PyList(new[] { Symbols.SPY.ToPython(), Symbols.AAPL.ToPython() });
 
-            Symbol[] symbols;
-            var canConvert = value.TryConvert(out symbols);
-            Assert.IsTrue(canConvert);
-            Assert.IsNotNull(symbols);
-            Assert.IsAssignableFrom<Symbol[]>(symbols);
+
+                Symbol[] symbols;
+                var canConvert = value.TryConvert(out symbols);
+                Assert.IsTrue(canConvert);
+                Assert.IsNotNull(symbols);
+                Assert.IsAssignableFrom<Symbol[]>(symbols);
+            }
         }
 
         [Test]
@@ -941,8 +1339,8 @@ class Test(PythonData):
             using (Py.GIL())
             {
                 // Try to convert a python object as a IndicatorBase<TradeBar>
-                var locals = new PyDict();
-                PythonEngine.Exec("class A:\n    pass", null, locals.Handle);
+                using var locals = new PyDict();
+                PythonEngine.Exec("class A:\n    pass", null, locals);
                 var value = locals.GetItem("A").Invoke();
 
                 IndicatorBase<TradeBar> indicatorBaseTradeBar;
@@ -959,7 +1357,7 @@ class Test(PythonData):
             using (Py.GIL())
             {
                 // Try to convert a python class which inherits from a C# object
-                value = PythonEngine.ModuleFromString("testModule",
+                value = PyModule.FromString("testModule",
                     @"
 from AlgorithmImports import *
 
@@ -982,10 +1380,10 @@ class Test(PythonData):
 
             using (Py.GIL())
             {
-                var locals = new PyDict();
-                PythonEngine.Exec(code, null, locals.Handle);
+                using var locals = new PyDict();
+                PythonEngine.Exec(code, null, locals);
                 var pyObject = locals.GetItem("coarseSelector");
-                pyObject.TryConvertToDelegate(out coarseSelector);
+                pyObject.TryAs(out coarseSelector);
             }
 
             var coarse = Enumerable
@@ -1009,10 +1407,10 @@ class Test(PythonData):
 
             using (Py.GIL())
             {
-                var locals = new PyDict();
-                PythonEngine.Exec("def raise_number(a): raise ValueError(a)", null, locals.Handle);
+                using var locals = new PyDict();
+                PythonEngine.Exec("def raise_number(a): raise ValueError(a)", null, locals);
                 var pyObject = locals.GetItem("raise_number");
-                pyObject.TryConvertToDelegate(out action);
+                pyObject.TryAs(out action);
             }
 
             try
@@ -1022,7 +1420,23 @@ class Test(PythonData):
             }
             catch (PythonException e)
             {
-                Assert.AreEqual($"ValueError : {2}", e.Message);
+                Assert.AreEqual($"{2}", e.Message);
+            }
+        }
+
+        [Test]
+        public void CSharpSelectorFunctionIsNotConverted()
+        {
+            using (Py.GIL())
+            {
+                var tradebarSelectorPyObject = Field.Volume.ToPython();
+                var quotebatSelectorPyObject = Field.BidClose.ToPython();
+                var tradebarResult = tradebarSelectorPyObject.TryAs<Func<IBaseData, decimal>>(out var tradebarCSharpSelector);
+                var quotebarResult = quotebatSelectorPyObject.TryAs<Func<IBaseData, decimal>>(out var quotebarCSharpSelector);
+                Assert.IsTrue(tradebarResult);
+                Assert.IsTrue(quotebarResult);
+                Assert.IsTrue(ReferenceEquals(Field.Volume, tradebarCSharpSelector));
+                Assert.IsTrue(ReferenceEquals(Field.BidClose, quotebarCSharpSelector));
             }
         }
 
@@ -1033,10 +1447,10 @@ class Test(PythonData):
 
             using (Py.GIL())
             {
-                var locals = new PyDict();
-                PythonEngine.Exec("def raise_number(a, b): raise ValueError(a * b)", null, locals.Handle);
+                using var locals = new PyDict();
+                PythonEngine.Exec("def raise_number(a, b): raise ValueError(a * b)", null, locals);
                 var pyObject = locals.GetItem("raise_number");
-                pyObject.TryConvertToDelegate(out action);
+                pyObject.TryAs(out action);
             }
 
             try
@@ -1046,7 +1460,7 @@ class Test(PythonData):
             }
             catch (PythonException e)
             {
-                Assert.AreEqual("ValueError : 6.0", e.Message);
+                Assert.AreEqual("6.0", e.Message);
             }
         }
 
@@ -1057,10 +1471,10 @@ class Test(PythonData):
 
             using (Py.GIL())
             {
-                var locals = new PyDict();
-                PythonEngine.Exec("def raise_number(a, b): raise ValueError(a * b)", null, locals.Handle);
+                using var locals = new PyDict();
+                PythonEngine.Exec("def raise_number(a, b): raise ValueError(a * b)", null, locals);
                 var pyObject = locals.GetItem("raise_number");
-                Assert.Throws<ArgumentException>(() => pyObject.TryConvertToDelegate(out action));
+                Assert.IsFalse(pyObject.TryAs(out action));
             }
         }
 
@@ -1073,10 +1487,10 @@ class Test(PythonData):
             IEnumerable<Symbol> symbols;
             using (Py.GIL())
             {
-                symbols = new PyString("SPY").ConvertToSymbolEnumerable();
+                using var pyString = new PyString("SPY");
+                symbols = pyString.ConvertToSymbolEnumerable();
+                Assert.AreEqual(Symbols.SPY, symbols.Single());
             }
-
-            Assert.AreEqual(Symbols.SPY, symbols.Single());
         }
 
         [Test]
@@ -1088,10 +1502,10 @@ class Test(PythonData):
             IEnumerable<Symbol> symbols;
             using (Py.GIL())
             {
-                symbols = new PyList(new[] { "SPY".ToPython() }).ConvertToSymbolEnumerable();
+                using var pyList = new PyList(new[] { "SPY".ToPython() });
+                symbols = pyList.ConvertToSymbolEnumerable();
+                Assert.AreEqual(Symbols.SPY, symbols.Single());
             }
-
-            Assert.AreEqual(Symbols.SPY, symbols.Single());
         }
 
         [Test]
@@ -1112,10 +1526,10 @@ class Test(PythonData):
             IEnumerable<Symbol> symbols;
             using (Py.GIL())
             {
-                symbols = new PyList(new[] {Symbols.SPY.ToPython()}).ConvertToSymbolEnumerable();
+                using var pyList = new PyList(new[] { Symbols.SPY.ToPython() });
+                symbols = pyList.ConvertToSymbolEnumerable();
+                Assert.AreEqual(Symbols.SPY, symbols.Single());
             }
-
-            Assert.AreEqual(Symbols.SPY, symbols.Single());
         }
 
         [Test]
@@ -1132,7 +1546,7 @@ class Test(PythonData):
         {
             using (Py.GIL())
             {
-                var actualDictionary = PythonEngine.ModuleFromString(
+                var actualDictionary = PyModule.FromString(
                     "PyObjectDictionaryConvertToDictionary_Success",
                     @"
 from datetime import datetime as dt
@@ -1165,7 +1579,7 @@ actualDictionary.update({'IBM': dt(2019,10,5)})
         {
             using (Py.GIL())
             {
-                var pyObject = PythonEngine.ModuleFromString(
+                var pyObject = PyModule.FromString(
                     "PyObjectDictionaryConvertToDictionary_FailNotDictionary",
                     "actualDictionary = list()"
                 ).GetAttr("actualDictionary");
@@ -1179,7 +1593,7 @@ actualDictionary.update({'IBM': dt(2019,10,5)})
         {
             using (Py.GIL())
             {
-                var pyObject = PythonEngine.ModuleFromString(
+                var pyObject = PyModule.FromString(
                     "PyObjectDictionaryConvertToDictionary_FailWrongItemType",
                     @"
 actualDictionary = dict()
@@ -1193,11 +1607,61 @@ actualDictionary.update({'IBM': 5})
             }
         }
 
+        public class TestGenericClass<T>
+        {
+            public T Value { get; set; }
+        }
+
+        public static TestGenericClass<int> GetGenericClassObject()
+        {
+            return new TestGenericClass<int>();
+        }
+
+        [Test]
+        public void PyObjectConvertFromGenericCSharpType()
+        {
+            using (Py.GIL())
+            {
+                var module = PyModule.FromString(
+                    "PyObjectConvertFromGenericCSharpType",
+                    @"
+from QuantConnect.Tests.Common.Util import ExtensionsTests
+
+def GetGenericClassObject():
+    return ExtensionsTests.GetGenericClassObject()
+");
+
+                var genericObject = module.GetAttr("GetGenericClassObject").Invoke();
+                var result = genericObject.TryConvert<TestGenericClass<int>>(out var _);
+                Assert.IsTrue(result);
+            }
+        }
+
+        [Test]
+        public void PyObjectConvertPythonTypeDerivedFromCSharpType([Values] bool allowPythonDerivative)
+        {
+            using (Py.GIL())
+            {
+                var module = PyModule.FromString(
+                    "PyObjectConvertPythonTypeDerivedFromCSharpType",
+                    @"
+from AlgorithmImports import *
+
+class TestPythonDerivedClass(PythonData):
+    pass
+");
+
+                var obj = module.GetAttr("TestPythonDerivedClass").Invoke();
+                var result = obj.TryConvert<PythonData>(out var _, allowPythonDerivative);
+
+                Assert.AreEqual(allowPythonDerivative, result);
+            }
+        }
 
         [Test]
         public void BatchByDoesNotDropItems()
         {
-            var list = new List<int> {1, 2, 3, 4, 5};
+            var list = new List<int> { 1, 2, 3, 4, 5 };
             var by2 = list.BatchBy(2).ToList();
             Assert.AreEqual(3, by2.Count);
             Assert.AreEqual(2, by2[0].Count);
@@ -1277,8 +1741,9 @@ actualDictionary.update({'IBM': 5})
         [Test]
         public void DateRulesToFunc()
         {
-            var dateRules = new DateRules(new SecurityManager(
-                new TimeKeeper(new DateTime(2015, 1, 1), DateTimeZone.Utc)), DateTimeZone.Utc);
+            var mhdb = MarketHoursDatabase.FromDataFolder();
+            var dateRules = new DateRules(null, new SecurityManager(
+                new TimeKeeper(new DateTime(2015, 1, 1), DateTimeZone.Utc)), DateTimeZone.Utc, mhdb);
             var first = new DateTime(2015, 1, 10);
             var second = new DateTime(2015, 1, 30);
             var dateRule = dateRules.On(first, second);
@@ -1311,7 +1776,6 @@ actualDictionary.update({'IBM': 5})
             var algo = new QCAlgorithm();
             var dataFeed = new NullDataFeed();
 
-            algo.SubscriptionManager = new SubscriptionManager();
             algo.SubscriptionManager.SetDataManager(new DataManager(
                 dataFeed,
                 new UniverseSelection(
@@ -1322,8 +1786,8 @@ actualDictionary.update({'IBM': 5})
                         SymbolPropertiesDatabase.FromDataFolder(),
                         algo,
                         null,
-                        null
-                    ),
+                        null,
+                        algorithm: algo),
                     new DataPermissionManager(),
                     TestGlobals.DataProvider
                 ),
@@ -1335,43 +1799,42 @@ actualDictionary.update({'IBM': 5})
                 new DataPermissionManager()
             ));
 
-            using (var zipDataCacheProvider = new ZipDataCacheProvider(TestGlobals.DataProvider))
+            algo.HistoryProvider = new SubscriptionDataReaderHistoryProvider();
+            algo.HistoryProvider.Initialize(
+                new HistoryProviderInitializeParameters(
+                    null,
+                    null,
+                    null,
+                    TestGlobals.DataCacheProvider,
+                    TestGlobals.MapFileProvider,
+                    TestGlobals.FactorFileProvider,
+                    (_) => { },
+                    false,
+                    new DataPermissionManager(),
+                    algo.ObjectStore,
+                    algo.Settings));
+
+            algo.SetStartDate(DateTime.UtcNow.AddDays(-1));
+
+            var history = algo.History(new[] { Symbols.IBM }, new DateTime(2013, 10, 7), new DateTime(2013, 10, 8), Resolution.Tick).ToList();
+            Assert.AreEqual(57460, history.Count);
+
+            foreach (var slice in history)
             {
-                algo.HistoryProvider = new SubscriptionDataReaderHistoryProvider();
-                algo.HistoryProvider.Initialize(
-                    new HistoryProviderInitializeParameters(
-                        null,
-                        null,
-                        null,
-                        zipDataCacheProvider,
-                        TestGlobals.MapFileProvider,
-                        TestGlobals.FactorFileProvider,
-                        (_) => {},
-                        false,
-                        new DataPermissionManager()));
-
-                algo.SetStartDate(DateTime.UtcNow.AddDays(-1));
-
-                var history = algo.History(new[] { Symbols.IBM }, new DateTime(2013, 10, 7), new DateTime(2013, 10, 8), Resolution.Tick).ToList();
-                Assert.AreEqual(57460, history.Count);
-
-                foreach (var slice in history)
+                if (!slice.Ticks.ContainsKey(Symbols.IBM))
                 {
-                    if (!slice.Ticks.ContainsKey(Symbols.IBM))
-                    {
-                        continue;
-                    }
+                    continue;
+                }
 
-                    foreach (var tick in slice.Ticks[Symbols.IBM])
+                foreach (var tick in slice.Ticks[Symbols.IBM])
+                {
+                    if (tick.BidPrice != 0)
                     {
-                        if (tick.BidPrice != 0)
-                        {
-                            Assert.LessOrEqual(Math.Abs(tick.Value - tick.BidPrice), 0.05);
-                        }
-                        if (tick.AskPrice != 0)
-                        {
-                            Assert.LessOrEqual(Math.Abs(tick.Value - tick.AskPrice), 0.05);
-                        }
+                        Assert.LessOrEqual(Math.Abs(tick.Value - tick.BidPrice), 0.05);
+                    }
+                    if (tick.AskPrice != 0)
+                    {
+                        Assert.LessOrEqual(Math.Abs(tick.Value - tick.AskPrice), 0.05);
                     }
                 }
             }
@@ -1404,8 +1867,8 @@ actualDictionary.update({'IBM': 5})
         [Test]
         public void ListEquals()
         {
-            var left = new[] {1, 2, 3};
-            var right = new[] {1, 2, 3};
+            var left = new[] { 1, 2, 3 };
+            var right = new[] { 1, 2, 3 };
             Assert.IsTrue(left.ListEquals(right));
 
             right[2] = 4;
@@ -1415,10 +1878,10 @@ actualDictionary.update({'IBM': 5})
         [Test]
         public void GetListHashCode()
         {
-            var ints1 = new[] {1, 2, 3};
-            var ints2 = new[] {1, 3, 2};
-            var longs = new[] {1L, 2L, 3L};
-            var decimals = new[] {1m, 2m, 3m};
+            var ints1 = new[] { 1, 2, 3 };
+            var ints2 = new[] { 1, 3, 2 };
+            var longs = new[] { 1L, 2L, 3L };
+            var decimals = new[] { 1m, 2m, 3m };
 
             // ordering dependent
             Assert.AreNotEqual(ints1.GetListHashCode(), ints2.GetListHashCode());
@@ -1431,7 +1894,7 @@ actualDictionary.update({'IBM': 5})
             Assert.AreEqual(ints1.GetListHashCode(), longs.GetListHashCode());
 
             // deterministic
-            Assert.AreEqual(ints1.GetListHashCode(), new[] {1, 2, 3}.GetListHashCode());
+            Assert.AreEqual(ints1.GetListHashCode(), new[] { 1, 2, 3 }.GetListHashCode());
         }
 
         [Test]
@@ -1454,6 +1917,376 @@ actualDictionary.update({'IBM': 5})
             var expected = decimal.Parse(expectedString, CultureInfo.InvariantCulture);
             var actual = value.DiscretelyRoundBy(quanta);
             Assert.AreEqual(expected, actual);
+        }
+
+        [TestCase(new int[] { 1, 2 }, 1)]
+        [TestCase(new int[] { -1, 10 }, 1)]
+        [TestCase(new int[] { 2, -5 }, 1)]
+        [TestCase(new int[] { 1, 2, 3 }, 1)]
+        [TestCase(new int[] { 200, -11, 7 }, 1)]
+        [TestCase(new int[] { 10, 20 }, 10)]
+        [TestCase(new int[] { -10, 100 }, 10)]
+        [TestCase(new int[] { 20, -50 }, 10)]
+        [TestCase(new int[] { 10, 20, 30 }, 10)]
+        [TestCase(new int[] { 1000, -55, 35 }, 5)]
+        [TestCase(new int[] { 24, 148, 36, 48, 52, 364 }, 4)]
+        [TestCase(new int[] { 41, 43, 47, 53, 59, 61, 67, 71, 73, 79, 83, 89, 97 }, 1)]
+        public void GreatestCommonDivisorTests(int[] values, int expectedResult)
+        {
+            Assert.AreEqual(expectedResult, values.GreatestCommonDivisor());
+        }
+
+        [Test]
+        public void ConvertsPythonUniverseSelectionSymbolIDDelegateToSymbolDelegate()
+        {
+            using (Py.GIL())
+            {
+                var module = PyModule.FromString(
+                    "ConvertsPythonUniverseSelectionSymbolIDDelegateToSymbolDelegate",
+                    @"
+def select_symbol(fundamental):
+    return [str(x.Symbol.ID) for x in fundamental]
+"
+                );
+                var selectSymbolPythonMethod = module.GetAttr("select_symbol");
+                Assert.IsTrue(selectSymbolPythonMethod.TryAs(out Func<IEnumerable<Fundamental>, object> selectSymbols));
+                Assert.IsNotNull(selectSymbols);
+
+                var selectSymbolsUniverseDelegate = selectSymbols.ConvertToUniverseSelectionSymbolDelegate();
+
+                var reference = new DateTime(2024, 2, 1);
+                var fundamentals = new List<Fundamental>()
+                {
+                    new Fundamental(reference, Symbols.SPY),
+                    new Fundamental(reference, Symbols.AAPL),
+                    new Fundamental(reference, Symbols.IBM),
+                    new Fundamental(reference, Symbols.GOOG)
+                };
+
+                List<Symbol> symbols = null;
+                Assert.DoesNotThrow(() => symbols = selectSymbolsUniverseDelegate(fundamentals).ToList());
+                CollectionAssert.IsNotEmpty(symbols);
+                Assert.That(symbols, Is.All.Matches<Symbol>(x => fundamentals.Any(fund => fund.Symbol == x)));
+            }
+        }
+
+        [TestCaseSource(nameof(DivideCases))]
+        public void SafeDivisionWorksAsExpectedWithEdgeCases(decimal numerator, decimal denominator)
+        {
+            Assert.DoesNotThrow(() => numerator.SafeDivision(denominator));
+        }
+
+        [TestCase("GOOGL", "2004/08/19", "2024/03/01", 2, "GOOG,GOOGL")] // IPO: August 19, 2004
+        [TestCase("GOOGL", "2010/02/01", "2012/03/01", 1, "GOOG")]
+        [TestCase("GOOGL", "2014/04/02", "2024/03/01", 2, "GOOG,GOOGL")] // The restructuring: "GOOG" to "GOOGL"
+        [TestCase("GOOGL", "2014/02/01", "2024/03/01", 2, "GOOG,GOOGL")]
+        [TestCase("GOOGL", "2020/02/01", "2024/03/01", 1, "GOOGL")]
+        [TestCase("GOOGL", "2023/02/01", "2024/03/01", 1, "GOOGL")]
+        [TestCase("GOOG", "2020/02/01", "2024/03/01", 1, "GOOG")]
+        [TestCase("AAPL", "2008/02/01", "2024/03/01", 1, "AAPL")]
+        [TestCase("AAPL", "2008/02/01", "2024/03/01", 1, "AAPL")]
+        [TestCase("GOOG", "2014/04/03", "2024/03/01", 1, "GOOG")] // The restructuring: April 2, 2014 "GOOCV" to "GOOG"
+        [TestCase("GOOG", "2013/04/03", "2014/04/01", 1, "GOOCV")]
+        [TestCase("GOOG", "2013/04/03", "2024/03/01", 2, "GOOCV,GOOG")]
+        [TestCase("GOOG", "2015/04/03", "2024/03/01", 1, "GOOG")]
+        [TestCase("GOOCV", "2010/01/01", "2024/03/01", 2, "GOOCV,GOOG")]
+        [TestCase("GOOG", "2014/01/01", "2024/03/01", 2, "GOOCV,GOOG")]
+        [TestCase("SPWR", "2005/11/17", "2024/03/01", 3, "SPWR,SPWRA,SPWR")] // IPO: November 17, 2005
+        [TestCase("SPWR", "2023/11/16", "2024/03/01", 1, "SPWR")]
+        [TestCase("NFLX", "2023/11/16", "2024/03/01", 0, null, Description = "The Symbol is not mapped")]
+        public void GetHistoricalSymbolNamesByDateRequest(string ticker, DateTime startDateTime, DateTime endDateTime, int expectedAmount, string expectedTickers)
+        {
+            var symbol = Symbol.Create(ticker, SecurityType.Equity, Market.USA);
+
+            var request = TestsHelpers.GetHistoryRequest(symbol, startDateTime, endDateTime, Resolution.Daily, TickType.Trade);
+
+            var tickers = TestGlobals.MapFileProvider.RetrieveSymbolHistoricalDefinitionsInDateRange(symbol, request.StartTimeUtc, request.EndTimeUtc).ToList();
+
+            Assert.That(tickers.Count, Is.EqualTo(expectedAmount));
+
+            if (tickers.Count != 0)
+            {
+                Assert.That(tickers.First().StartDateTimeLocal, Is.EqualTo(startDateTime));
+                Assert.That(tickers.Last().EndDateTimeLocal, Is.EqualTo(endDateTime));
+
+                if (expectedTickers != null)
+                {
+                    foreach (var (actualTicker, expectedTicker) in tickers.Zip(expectedTickers.Split(','), (t, et) => (t.Ticker, et)))
+                    {
+                        Assert.That(actualTicker, Is.EqualTo(expectedTicker));
+                    }
+                }
+            }
+        }
+
+        [TestCase(Futures.Indices.SP500EMini, "2023/11/16", 1)]
+        [TestCase(Futures.Metals.Gold, "2023/11/16", 0, Description = "The startDateTime is not mapped")]
+        public void GetHistoricalFutureSymbolNamesByDateRequest(string ticker, DateTime expiryTickerDate, int expectedAmount)
+        {
+            var futureSymbol = Symbols.CreateFutureSymbol(ticker, expiryTickerDate);
+
+            var tickers =
+                TestGlobals.MapFileProvider.RetrieveSymbolHistoricalDefinitionsInDateRange(futureSymbol, new DateTime(2023, 11, 5), expiryTickerDate).ToList();
+
+            Assert.That(tickers.Count, Is.EqualTo(expectedAmount));
+        }
+
+        [TestCaseSource(nameof(GetPythonPropertyOfACustomIndicatorWorksTestCases))]
+        public void GetPythonPropertyOfACustomIndicatorWorks(string stringModule, string propertyName, bool implementsProperty, bool expectedPropertyValue)
+        {
+            using (Py.GIL())
+            {
+                var module = PyModule.FromString(Guid.NewGuid().ToString(), stringModule);
+                var indicator = module.GetAttr("CustomSimpleMovingAverage")
+                .Invoke("custom".ToPython(), 10.ToPython());
+
+                Assert.AreEqual(implementsProperty, indicator.GetPythonBoolPropertyWithChecks(propertyName) != null);
+                if (implementsProperty)
+                {
+                    var property = indicator.GetPythonBoolPropertyWithChecks(propertyName);
+                    var value = BasePythonWrapper<IIndicator>.PythonRuntimeChecker.ConvertAndDispose<bool>(property, propertyName, isMethod: false);
+                    Assert.AreEqual(expectedPropertyValue, value);
+                }
+            }
+        }
+
+        [Test]
+        public void TryGetFromCsv_EmptyCsv_ReturnsNull()
+        {
+            var csvLine = "";
+            var index = 0;
+
+            Assert.IsFalse(csvLine.TryGetFromCsv(index, out var result));
+            Assert.IsTrue(result.IsEmpty);
+        }
+
+        [Test]
+        public void TryGetFromCsv_SingleValue_ReturnsValue()
+        {
+            var csvLine = "value";
+            var index = 0;
+
+            Assert.IsTrue(csvLine.TryGetFromCsv(index, out var result));
+            Assert.AreEqual("value", result.ToString());
+        }
+
+        [TestCase("value1,value2,value3", 0, "value1")]
+        [TestCase("value1,value2,value3", 1, "value2")]
+        [TestCase("value1,value2,value3", 2, "value3")]
+        [TestCase("value1,value2,value3,", 0, "value1")]
+        [TestCase("value1,value2,value3,", 1, "value2")]
+        [TestCase("value1,value2,value3,", 2, "value3")]
+        [TestCase("value1,value2,value3,", 3, "")]
+        public void TryGetFromCsv_MultipleValues_ReturnsCorrectValue(string csvLine, int index, string expectedValue)
+        {
+            Assert.IsTrue(csvLine.TryGetFromCsv(index, out var result));
+            Assert.AreEqual(expectedValue, result.ToString());
+        }
+
+        [TestCase(-1)]
+        [TestCase(3)]
+        public void TryGetFromCsv_InvalidIndex_ReturnsNull(int index)
+        {
+            var csvLine = "value1,value2,value3";
+            Assert.IsFalse(csvLine.TryGetFromCsv(index, out var result));
+            Assert.IsTrue(result.IsEmpty);
+        }
+
+        [TestCase(0)]
+        [TestCase(-1)]
+        [TestCase(3)]
+        public void TryGetDecimalFromCsv_InvalidTypeOrIndex_ReturnsZero(int index)
+        {
+            var csvLine = "value1,value2,value3";
+            Assert.IsFalse(csvLine.TryGetDecimalFromCsv(index, out var result));
+            Assert.AreEqual(0, result);
+        }
+
+        [TestCase(0, 2.0)]
+        [TestCase(1, 1.234)]
+        public void TryGetDecimalFromCsv_ReturnsDecimalValue(int index, decimal expectedValue)
+        {
+            var csvLine = "2,1.234";
+            Assert.IsTrue(csvLine.TryGetDecimalFromCsv(index, out var result));
+            Assert.AreEqual(expectedValue, result);
+        }
+
+        [Test]
+        public void GetsEnumStringInPython([Values] bool useIntValue)
+        {
+            using (Py.GIL())
+            {
+                var module = PyModule.FromString(
+                    "GetsEnumStringInPython",
+                    @"
+from AlgorithmImports import *
+
+def get_enum_string(value):
+    return Extensions.get_enum_string(value, Resolution)
+"
+                );
+
+                using var getEnumString = module.GetAttr("get_enum_string");
+                var enumValue = Resolution.Minute;
+                using var pyEnumValue = useIntValue ? Convert.ToInt64(enumValue).ToPython() : enumValue.ToPython();
+                var enumString = getEnumString.Invoke(pyEnumValue).As<string>();
+
+                Assert.AreEqual(nameof(Resolution.Minute), enumString);
+            }
+        }
+
+        private class TestDto
+        {
+            public string Name { get; set; }
+            public DateTime Date { get; set; }
+            public decimal Amount { get; set; }
+        }
+
+        [Test]
+        public void JsonStreamSerializationRoundTrip()
+        {
+            var original = new TestDto()
+            {
+                Name = "Test",
+                Date = new DateTime(2024, 1, 1),
+                Amount = 123.45m
+            };
+
+            using var stream = new MemoryStream();
+            original.SerializeJsonToStream(stream);
+
+            stream.Seek(0, SeekOrigin.Begin);
+            var deserialized = stream.DeserializeJson<TestDto>();
+
+            Assert.AreEqual(original.Name, deserialized.Name);
+            Assert.AreEqual(original.Date, deserialized.Date);
+            Assert.AreEqual(original.Amount, deserialized.Amount);
+        }
+
+        [Test]
+        public void JsonStringSerializationRoundTrip()
+        {
+            var original = new TestDto()
+            {
+                Name = "Test",
+                Date = new DateTime(2024, 1, 1),
+                Amount = 123.45m
+            };
+
+            var jsonString = original.SerializeJsonToString();
+            var deserialized = jsonString.DeserializeJson<TestDto>();
+
+            Assert.AreEqual(original.Name, deserialized.Name);
+            Assert.AreEqual(original.Date, deserialized.Date);
+            Assert.AreEqual(original.Amount, deserialized.Amount);
+        }
+
+        [Test]
+        public void TryDownloadDataDeserializesToCorrectType()
+        {
+            var json = "{\"Open\": 10.5, \"High\": 12.0, \"Low\": 9.5, \"Close\": 11.0}";
+            using var client = MockClient(json, HttpStatusCode.OK);
+
+            bool success = client.TryDownloadData<Bar>("http://test.com", out var bar, out _);
+
+            Assert.IsTrue(success);
+            Assert.AreEqual(10.5m, bar.Open);
+            Assert.AreEqual(12.0m, bar.High);
+            Assert.AreEqual(9.5m, bar.Low);
+            Assert.AreEqual(11.0m, bar.Close);
+        }
+
+        [TestCase("{\"Sucess\": true}")]
+        [TestCase("Plain text response")]
+        public void TryDownloadDataReturnsRawResponseWhenTypeIsString(string json)
+        {
+            using var client = MockClient(json, HttpStatusCode.OK);
+
+            bool success1 = client.TryDownloadData<string>("http://test.com", out var result1, out _);
+            bool success2 = client.TryDownloadData("http://test.com", out var result2, out _);
+
+            Assert.IsTrue(success1 && success2);
+            Assert.AreEqual(json, result1);
+            Assert.AreEqual(json, result2);
+        }
+
+        [Test]
+        public void TryDownloadDataHandlesNetworkError()
+        {
+            var handlerMock = new Mock<HttpMessageHandler>();
+            handlerMock
+               .Protected()
+               .Setup<Task<HttpResponseMessage>>(
+                  "SendAsync",
+                  ItExpr.IsAny<HttpRequestMessage>(),
+                  ItExpr.IsAny<CancellationToken>())
+               .ThrowsAsync(new HttpRequestException("Network connection failed!"));
+
+            using var client = new HttpClient(handlerMock.Object);
+
+            bool success = client.TryDownloadData<Bar>("http://test.com", out var result, out var statusCode);
+
+            Assert.IsFalse(success);
+            Assert.IsNull(result);
+            Assert.IsNull(statusCode);
+        }
+
+        private static HttpClient MockClient(string content, HttpStatusCode code)
+        {
+            var handlerMock = new Mock<HttpMessageHandler>();
+
+            handlerMock
+               .Protected()
+               .Setup<Task<HttpResponseMessage>>(
+                  "SendAsync",
+                  ItExpr.IsAny<HttpRequestMessage>(),
+                  ItExpr.IsAny<CancellationToken>())
+               .Returns(() => Task.FromResult(new HttpResponseMessage
+               {
+                   StatusCode = code,
+                   Content = new StringContent(content),
+               }));
+
+            return new HttpClient(handlerMock.Object);
+        }
+
+        private static TestCaseData[] MirrorOptionTestCases
+        {
+            get
+            {
+                var spy = Symbol.Create("SPY", SecurityType.Equity, Market.USA);
+                var spx = Symbol.Create("SPX", SecurityType.Index, Market.USA);
+
+                var strike = 100m;
+                var expiry = new DateTime(2021, 1, 1);
+
+                var spyCall = Symbol.CreateOption(spy, Market.USA, OptionStyle.American, OptionRight.Call, strike, expiry);
+                var spyPut = Symbol.CreateOption(spy, Market.USA, OptionStyle.American, OptionRight.Put, strike, expiry);
+
+                var spxCall = Symbol.CreateOption(spx, Market.USA, OptionStyle.European, OptionRight.Call, strike, expiry);
+                var spxPut = Symbol.CreateOption(spx, Market.USA, OptionStyle.European, OptionRight.Put, strike, expiry);
+
+                var spxwCall = Symbol.CreateOption(spx, "SPXW", Market.USA, OptionStyle.European, OptionRight.Call, strike, expiry);
+                var spxwPut = Symbol.CreateOption(spx, "SPXW", Market.USA, OptionStyle.European, OptionRight.Put, strike, expiry);
+
+                return new[]
+                {
+                    new TestCaseData(spyCall).Returns(spyPut),
+                    new TestCaseData(spyPut).Returns(spyCall),
+
+                    new TestCaseData(spxCall).Returns(spxPut),
+                    new TestCaseData(spxPut).Returns(spxCall),
+
+                    new TestCaseData(spxwCall).Returns(spxwPut),
+                    new TestCaseData(spxwPut).Returns(spxwCall),
+                };
+            }
+        }
+
+        [TestCaseSource(nameof(MirrorOptionTestCases))]
+        public Symbol GetsCorrectMirrorOption(Symbol optionSymbol)
+        {
+            return optionSymbol.GetMirrorOptionSymbol();
         }
 
         private PyObject ConvertToPyObject(object value)
@@ -1490,5 +2323,287 @@ actualDictionary.update({'IBM': 5})
                 new SecurityCache()
             );
         }
+
+        private static object[] DivideCases =
+        {
+            new decimal[] { 100000000000000000000m, 0.000000000001m },
+            new decimal[] { -100000000000000000000m, 0.000000000001m },
+            new decimal[] { 1, 0 },
+            new decimal[] { 0.0000000000000001m, 10000000000000000000000000000m },
+            new decimal[] { -0.000000000000001m, 10000000000000000000000000000m },
+        };
+
+        private static object[] GetPythonPropertyOfACustomIndicatorWorksTestCases =
+        {
+            new object[] { $@"
+from AlgorithmImports import *
+from collections import deque
+
+class CustomSimpleMovingAverage(PythonIndicator):
+    def __init__(self, name, period):
+        self.name = name
+        self.value = 0
+        self.period = period
+        self.warm_up_period = period
+        self.queue = deque(maxlen=period)
+
+    def custom_property(self):
+        return True
+
+    # Update method is mandatory
+    def update(self, input):
+        return True
+", "custom_property", false, true},
+            new object[] { $@"
+from AlgorithmImports import *
+from collections import deque
+
+class CustomSimpleMovingAverage(PythonIndicator):
+    def __init__(self, name, period):
+        self.name = name
+        self.value = 0
+        self.period = period
+        self.warm_up_period = period
+        self.queue = deque(maxlen=period)
+
+    def custom_property(self):
+        return False
+
+    # Update method is mandatory
+    def update(self, input):
+        return True
+", "custom_property", false, false},
+            new object[] { $@"
+from AlgorithmImports import *
+from collections import deque
+
+class CustomSimpleMovingAverage(PythonIndicator):
+    def __init__(self, name, period):
+        self.name = name
+        self.value = 0
+        self.period = period
+        self.warm_up_period = period
+        self.queue = deque(maxlen=period)
+
+    # Update method is mandatory
+    def update(self, input):
+        return True
+", "custom_property",false, false},
+            new object[] { $@"
+from AlgorithmImports import *
+from collections import deque
+
+class CustomSimpleMovingAverage(PythonIndicator):
+    def __init__(self, name, period):
+        self.name = name
+        self.value = 0
+        self.period = period
+        self.warm_up_period = period
+        self.queue = deque(maxlen=period)
+
+    @property
+    def custom_property(self):
+        return True
+
+    # Update method is mandatory
+    def update(self, input):
+        return True
+", "custom_property", true, true},
+            new object[] { $@"
+from AlgorithmImports import *
+from collections import deque
+
+class CustomSimpleMovingAverage(PythonIndicator):
+    def __init__(self, name, period):
+        self.name = name
+        self.value = 0
+        self.period = period
+        self.warm_up_period = period
+        self.queue = deque(maxlen=period)
+
+    @property
+    def custom_property(self):
+        return False
+
+    # Update method is mandatory
+    def update(self, input):
+        return True
+", "custom_property", true, false},
+            new object[] { $@"
+from AlgorithmImports import *
+from collections import deque
+
+class CustomSimpleMovingAverage(PythonIndicator):
+    def __init__(self, name, period):
+        self.name = name
+        self.value = 0
+        self.period = period
+        self.warm_up_period = period
+        self.queue = deque(maxlen=period)
+        self.custom_property = False
+
+    @property
+    def custom_property(self):
+        return self._custom_property
+
+    @custom_property.setter
+    def custom_property(self, value):
+        self._custom_property = value
+
+    # Update method is mandatory
+    def update(self, input):
+        return True
+", "custom_property", true, false},
+            new object[] { $@"
+from AlgorithmImports import *
+from collections import deque
+
+class CustomSimpleMovingAverage(PythonIndicator):
+    def __init__(self, name, period):
+        self.name = name
+        self.value = 0
+        self.period = period
+        self.warm_up_period = period
+        self.queue = deque(maxlen=period)
+        self.custom_property = True
+
+    @property
+    def custom_property(self):
+        return self._custom_property
+
+    @custom_property.setter
+    def custom_property(self, value):
+        self._custom_property = value
+
+    # Update method is mandatory
+    def update(self, input):
+        return True
+", "custom_property", true, true},
+            new object[] { $@"
+from AlgorithmImports import *
+from collections import deque
+
+class CustomSimpleMovingAverage(PythonIndicator):
+    def __init__(self, name, period):
+        self.name = name
+        self.value = 0
+        self.period = period
+        self.warm_up_period = period
+        self.queue = deque(maxlen=period)
+        self.is_ready = True
+
+    @property
+    def is_ready(self):
+        return self._is_ready
+
+    @is_ready.setter
+    def is_ready(self, value):
+        self._is_ready = value
+
+    # Update method is mandatory
+    def update(self, input):
+        return True
+", "is_ready", true, true},
+            new object[] { $@"
+from AlgorithmImports import *
+from collections import deque
+
+class CustomSimpleMovingAverage(PythonIndicator):
+    def __init__(self, name, period):
+        self.name = name
+        self.value = 0
+        self.period = period
+        self.warm_up_period = period
+        self.queue = deque(maxlen=period)
+        self.is_ready = False
+
+    @property
+    def is_ready(self):
+        return self._is_ready
+
+    @is_ready.setter
+    def is_ready(self, value):
+        self._is_ready = value
+
+    # Update method is mandatory
+    def update(self, input):
+        return True
+", "is_ready", true, false},
+            new object[] { $@"
+from AlgorithmImports import *
+from collections import deque
+
+class CustomSimpleMovingAverage(PythonIndicator):
+    def __init__(self, name, period):
+        self.name = name
+        self.value = 0
+        self.period = period
+        self.warm_up_period = period
+        self.queue = deque(maxlen=period)
+
+    @property
+    def is_ready(self):
+        return False
+
+    # Update method is mandatory
+    def update(self, input):
+        return True
+", "is_ready", true, false},
+            new object[] { $@"
+from AlgorithmImports import *
+from collections import deque
+
+class CustomSimpleMovingAverage(PythonIndicator):
+    def __init__(self, name, period):
+        self.name = name
+        self.value = 0
+        self.period = period
+        self.warm_up_period = period
+        self.queue = deque(maxlen=period)
+
+    @property
+    def is_ready(self):
+        return True
+
+    # Update method is mandatory
+    def update(self, input):
+        return True
+", "is_ready", true, true},
+            new object[] { $@"
+from AlgorithmImports import *
+from collections import deque
+
+class CustomSimpleMovingAverage(PythonIndicator):
+    def __init__(self, name, period):
+        self.name = name
+        self.value = 0
+        self.period = period
+        self.warm_up_period = period
+        self.queue = deque(maxlen=period)
+
+    def is_ready(self):
+        return False
+
+    # Update method is mandatory
+    def update(self, input):
+        return True
+", "is_ready", false, false},
+            new object[] { $@"
+from AlgorithmImports import *
+from collections import deque
+
+class CustomSimpleMovingAverage(PythonIndicator):
+    def __init__(self, name, period):
+        self.name = name
+        self.value = 0
+        self.period = period
+        self.warm_up_period = period
+        self.queue = deque(maxlen=period)
+
+    # Update method is mandatory
+    def update(self, input):
+        return True
+", "is_ready", false, false},
+        };
     }
 }

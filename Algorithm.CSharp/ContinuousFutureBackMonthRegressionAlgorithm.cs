@@ -49,7 +49,7 @@ namespace QuantConnect.Algorithm.CSharp
                     dataMappingMode: DataMappingMode.OpenInterest,
                     contractDepthOffset: 5
                 );
-                throw new Exception("Expected out of rage exception. We don't support that many back months");
+                throw new RegressionTestException("Expected out of rage exception. We don't support that many back months");
             }
             catch (ArgumentOutOfRangeException)
             {
@@ -66,15 +66,15 @@ namespace QuantConnect.Algorithm.CSharp
         /// <summary>
         /// OnData event is the primary entry point for your algorithm. Each new data point will be pumped in here.
         /// </summary>
-        /// <param name="data">Slice object keyed by symbol containing the stock data</param>
-        public override void OnData(Slice data)
+        /// <param name="slice">Slice object keyed by symbol containing the stock data</param>
+        public override void OnData(Slice slice)
         {
-            if (data.Keys.Count != 1)
+            if (slice.Keys.Count != 1)
             {
-                throw new Exception($"We are getting data for more than one symbols! {string.Join(",", data.Keys.Select(symbol => symbol))}");
+                throw new RegressionTestException($"We are getting data for more than one symbols! {string.Join(",", slice.Keys.Select(symbol => symbol))}");
             }
 
-            foreach (var changedEvent in data.SymbolChangedEvents.Values)
+            foreach (var changedEvent in slice.SymbolChangedEvents.Values)
             {
                 if (changedEvent.Symbol == _continuousContract.Symbol)
                 {
@@ -86,8 +86,13 @@ namespace QuantConnect.Algorithm.CSharp
 
                     if (backMonthExpiration <= frontMonthExpiration.Date)
                     {
-                        throw new Exception($"Unexpected current mapped contract expiration {backMonthExpiration}" +
+                        throw new RegressionTestException($"Unexpected current mapped contract expiration {backMonthExpiration}" +
                             $" @ {Time} it should be AFTER front month expiration {frontMonthExpiration}");
+                    }
+
+                    if (_continuousContract.Mapped != changedEvent.Symbol.Underlying)
+                    {
+                        throw new RegressionTestException($"Unexpected mapped continuous contract {_continuousContract.Mapped} expected {changedEvent.Symbol.Underlying}");
                     }
                 }
             }
@@ -97,14 +102,16 @@ namespace QuantConnect.Algorithm.CSharp
                 _lastDateLog = Time;
 
                 Log($"{Time}- {Securities[_continuousContract.Symbol].GetLastData()}");
-                if (Portfolio.Invested)
+                if (_continuousContract.Exchange.ExchangeOpen)
                 {
-                    Liquidate();
+                    if (Portfolio.Invested)
+                    {
+                        Liquidate();
+                    }
+                    else
+                    {
+                        Buy(_continuousContract.Mapped, 1);
                 }
-                else
-                {
-                    // This works because we set this contract as tradable, even if it's a canonical security
-                    Buy(_continuousContract.Symbol, 1);
                 }
 
                 if(Time.Month == 1 && Time.Year == 2013)
@@ -112,7 +119,7 @@ namespace QuantConnect.Algorithm.CSharp
                     var response = History(new[] { _continuousContract.Symbol }, 60 * 24 * 90);
                     if (!response.Any())
                     {
-                        throw new Exception("Unexpected empty history response");
+                        throw new RegressionTestException("Unexpected empty history response");
                     }
                 }
             }
@@ -131,7 +138,7 @@ namespace QuantConnect.Algorithm.CSharp
             var expectedMappingCounts = 2;
             if (_mappings.Count != expectedMappingCounts)
             {
-                throw new Exception($"Unexpected symbol changed events: {_mappings.Count}, was expecting {expectedMappingCounts}");
+                throw new RegressionTestException($"Unexpected symbol changed events: {_mappings.Count}, was expecting {expectedMappingCounts}");
             }
         }
 
@@ -143,55 +150,56 @@ namespace QuantConnect.Algorithm.CSharp
         /// <summary>
         /// This is used by the regression test system to indicate which languages this algorithm is written in.
         /// </summary>
-        public Language[] Languages { get; } = { Language.CSharp };
+        public List<Language> Languages { get; } = new() { Language.CSharp };
+
+        /// <summary>
+        /// Data Points count of all timeslices of algorithm
+        /// </summary>
+        public long DataPoints => 172698;
+
+        /// <summary>
+        /// Data Points count of the algorithm history
+        /// </summary>
+        public int AlgorithmHistoryDataPoints => 0;
+
+        /// <summary>
+        /// Final status of the algorithm
+        /// </summary>
+        public AlgorithmStatus AlgorithmStatus => AlgorithmStatus.Completed;
 
         /// <summary>
         /// This is used by the regression test system to indicate what the expected statistics are from running the algorithm
         /// </summary>
         public Dictionary<string, string> ExpectedStatistics => new Dictionary<string, string>
         {
-            {"Total Trades", "3"},
-            {"Average Win", "1.16%"},
+            {"Total Orders", "3"},
+            {"Average Win", "6.43%"},
             {"Average Loss", "0%"},
-            {"Compounding Annual Return", "2.229%"},
+            {"Compounding Annual Return", "14.898%"},
             {"Drawdown", "1.600%"},
             {"Expectancy", "0"},
-            {"Net Profit", "1.118%"},
-            {"Sharpe Ratio", "0.726"},
-            {"Probabilistic Sharpe Ratio", "38.511%"},
+            {"Start Equity", "100000"},
+            {"End Equity", "107241.4"},
+            {"Net Profit", "7.241%"},
+            {"Sharpe Ratio", "1.511"},
+            {"Sortino Ratio", "1.208"},
+            {"Probabilistic Sharpe Ratio", "74.255%"},
             {"Loss Rate", "0%"},
             {"Win Rate", "100%"},
             {"Profit-Loss Ratio", "0"},
-            {"Alpha", "-0.007"},
-            {"Beta", "0.099"},
-            {"Annual Standard Deviation", "0.022"},
-            {"Annual Variance", "0"},
-            {"Information Ratio", "-2.74"},
-            {"Tracking Error", "0.076"},
-            {"Treynor Ratio", "0.159"},
-            {"Total Fees", "$5.55"},
-            {"Estimated Strategy Capacity", "$290000.00"},
-            {"Lowest Capacity Asset", "ES 1S1"},
-            {"Fitness Score", "0.009"},
-            {"Kelly Criterion Estimate", "0"},
-            {"Kelly Criterion Probability Value", "0"},
-            {"Sortino Ratio", "0.498"},
-            {"Return Over Maximum Drawdown", "1.803"},
-            {"Portfolio Turnover", "0.014"},
-            {"Total Insights Generated", "0"},
-            {"Total Insights Closed", "0"},
-            {"Total Insights Analysis Completed", "0"},
-            {"Long Insight Count", "0"},
-            {"Short Insight Count", "0"},
-            {"Long/Short Ratio", "100%"},
-            {"Estimated Monthly Alpha Value", "$0"},
-            {"Total Accumulated Estimated Alpha Value", "$0"},
-            {"Mean Population Estimated Insight Value", "$0"},
-            {"Mean Population Direction", "0%"},
-            {"Mean Population Magnitude", "0%"},
-            {"Rolling Averaged Population Direction", "0%"},
-            {"Rolling Averaged Population Magnitude", "0%"},
-            {"OrderListHash", "e669103cc598f59d85f5e8d5f0b8df30"}
+            {"Alpha", "0.075"},
+            {"Beta", "0.096"},
+            {"Annual Standard Deviation", "0.063"},
+            {"Annual Variance", "0.004"},
+            {"Information Ratio", "-1.256"},
+            {"Tracking Error", "0.097"},
+            {"Treynor Ratio", "0.996"},
+            {"Total Fees", "$6.45"},
+            {"Estimated Strategy Capacity", "$240000000.00"},
+            {"Lowest Capacity Asset", "ES VP274HSU1AF5"},
+            {"Portfolio Turnover", "1.37%"},
+            {"Drawdown Recovery", "16"},
+            {"OrderListHash", "c2eacc46e837feb8bf019c43f5c03f40"}
         };
     }
 }

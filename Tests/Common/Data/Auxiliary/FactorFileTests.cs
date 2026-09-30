@@ -382,6 +382,20 @@ namespace QuantConnect.Tests.Common.Data.Auxiliary
         }
 
         [Test]
+        public void HandlesUnknownDataMappingModes()
+        {
+            var lines = new[]
+            {
+                "{\"Date\":\"2010-01-28T00:00:00\",\"BackwardsRatioScale\":[1.1575],\"BackwardsPanamaCanalScale\":[7.06],\"ForwardPanamaCanalScale\":[0.0],\"DataMappingMode\":1}",
+                "{\"Date\":\"2010-02-25T00:00:00\",\"BackwardsRatioScale\":[1.1575],\"BackwardsPanamaCanalScale\":[7.06],\"ForwardPanamaCanalScale\":[0.0],\"DataMappingMode\":788}"
+            };
+
+            var factorFile = PriceScalingExtensions.SafeRead("cl", lines, SecurityType.Future) as MappingContractFactorProvider;
+            Assert.AreEqual(1, factorFile.Count());
+            Assert.AreEqual(DataMappingMode.FirstDayMonth, (factorFile.First() as MappingContractFactorRow).DataMappingMode);
+        }
+
+        [Test]
         public void ResolvesCorrectMostRecentFactorChangeDate()
         {
             var lines = new[]
@@ -420,11 +434,6 @@ namespace QuantConnect.Tests.Common.Data.Auxiliary
             return file;
         }
 
-        private static IFactorProvider GetFactorFile(string permtick)
-        {
-            return TestGlobals.FactorFileProvider.Get(permtick);
-        }
-
         private static CorporateFactorProvider GetFactorFile_LODE20191127()
         {
             const string factorFileContents = @"
@@ -433,8 +442,9 @@ namespace QuantConnect.Tests.Common.Data.Auxiliary
 20501231,1,1,0,qq
 ";
             DateTime? factorFileMinimumDate;
-            var reader = new StreamReader(factorFileContents.ToStream());
-            var enumerable = new StreamReaderEnumerable(reader).Where(line => line.Length > 0);
+            using var reader = new StreamReader(factorFileContents.ToStream());
+            using var streamReaderEnumerable = new StreamReaderEnumerable(reader);
+            var enumerable = streamReaderEnumerable.Where(line => line.Length > 0);
             var factorFileRows = CorporateFactorRow.Parse(enumerable, out factorFileMinimumDate);
             return new CorporateFactorProvider("lode", factorFileRows, factorFileMinimumDate);
         }
@@ -448,8 +458,9 @@ namespace QuantConnect.Tests.Common.Data.Auxiliary
 20501231,1,1,0,qq
 ";
             DateTime? factorFileMinimumDate;
-            var reader = new StreamReader(factorFileContents.ToStream());
-            var enumerable = new StreamReaderEnumerable(reader).Where(line => line.Length > 0);
+            using var reader = new StreamReader(factorFileContents.ToStream());
+            using var streamReaderEnumerable = new StreamReaderEnumerable(reader);
+            var enumerable = streamReaderEnumerable.Where(line => line.Length > 0);
             var factorFileRows = CorporateFactorRow.Parse(enumerable, out factorFileMinimumDate);
             return new CorporateFactorProvider("lode", factorFileRows, factorFileMinimumDate);
         }
@@ -489,8 +500,9 @@ namespace QuantConnect.Tests.Common.Data.Auxiliary
 ";
 
             DateTime? factorFileMinimumDate;
-            var reader = new StreamReader(factorFileContents.ToStream());
-            var enumerable = new StreamReaderEnumerable(reader).Where(line => line.Length > 0);
+            using var reader = new StreamReader(factorFileContents.ToStream());
+            using var streamReaderEnumerable = new StreamReaderEnumerable(reader);
+            var enumerable = streamReaderEnumerable.Where(line => line.Length > 0);
             var factorFileRows = CorporateFactorRow.Parse(enumerable, out factorFileMinimumDate);
             return new CorporateFactorProvider("aapl", factorFileRows, factorFileMinimumDate);
         }
@@ -530,8 +542,9 @@ namespace QuantConnect.Tests.Common.Data.Auxiliary
 ";
 
             DateTime? factorFileMinimumDate;
-            var reader = new StreamReader(factorFileContents.ToStream());
-            var enumerable = new StreamReaderEnumerable(reader).Where(line => line.Length > 0);
+            using var reader = new StreamReader(factorFileContents.ToStream());
+            using var streamReaderEnumerable = new StreamReaderEnumerable(reader);
+            var enumerable = streamReaderEnumerable.Where(line => line.Length > 0);
             var factorFileRows = CorporateFactorRow.Parse(enumerable, out factorFileMinimumDate);
             return new CorporateFactorProvider("aapl", factorFileRows, factorFileMinimumDate);
         }

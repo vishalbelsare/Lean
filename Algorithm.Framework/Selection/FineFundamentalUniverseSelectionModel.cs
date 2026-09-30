@@ -1,4 +1,4 @@
-﻿/*
+/*
  * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
  * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
  *
@@ -18,7 +18,6 @@ using System.Collections.Generic;
 using Python.Runtime;
 using QuantConnect.Data.Fundamental;
 using QuantConnect.Data.UniverseSelection;
-using QuantConnect.Securities;
 
 namespace QuantConnect.Algorithm.Framework.Selection
 {
@@ -61,8 +60,8 @@ namespace QuantConnect.Algorithm.Framework.Selection
         {
             Func<IEnumerable<FineFundamental>, object> fineFunc;
             Func<IEnumerable<CoarseFundamental>, object> coarseFunc;
-            if (fineSelector.TryConvertToDelegate(out fineFunc) &&
-                coarseSelector.TryConvertToDelegate(out coarseFunc))
+            if (fineSelector.TrySafeAs(out fineFunc) &&
+                coarseSelector.TrySafeAs(out coarseFunc))
             {
                 _fineSelector = fineFunc.ConvertToUniverseSelectionSymbolDelegate();
                 _coarseSelector = coarseFunc.ConvertToUniverseSelectionSymbolDelegate();
@@ -72,12 +71,24 @@ namespace QuantConnect.Algorithm.Framework.Selection
         /// <inheritdoc />
         public override IEnumerable<Symbol> SelectCoarse(QCAlgorithm algorithm, IEnumerable<CoarseFundamental> coarse)
         {
+            // Check if this method was overridden in Python
+            if (TryInvokePythonOverride(nameof(SelectCoarse), out IEnumerable<Symbol> result, algorithm, coarse))
+            {
+                return result;
+            }
+
             return _coarseSelector(coarse);
         }
 
         /// <inheritdoc />
         public override IEnumerable<Symbol> SelectFine(QCAlgorithm algorithm, IEnumerable<FineFundamental> fine)
         {
+            // Check if this method was overridden in Python
+            if (TryInvokePythonOverride(nameof(SelectFine), out IEnumerable<Symbol> result, algorithm, fine))
+            {
+                return result;
+            }
+
             return _fineSelector(fine);
         }
     }

@@ -1,4 +1,4 @@
-﻿/*
+/*
  * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
  * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
  *
@@ -37,8 +37,7 @@ namespace QuantConnect.Exceptions
         public override bool CanInterpret(Exception exception)
         {
             return base.CanInterpret(exception) &&
-                exception.Message.Contains("TypeError") &&
-                exception.Message.Contains("unsupported operand type");
+                exception.Message.Contains(Messages.UnsupportedOperandPythonExceptionInterpreter.UnsupportedOperandTypeExpectedSubstring);
         }
 
         /// <summary>
@@ -51,8 +50,12 @@ namespace QuantConnect.Exceptions
         {
             var pe = (PythonException)exception;
 
-            var types = pe.Message.Split(':')[2].Trim();
-            var message = $"Trying to perform a summation, subtraction, multiplication or division between {types} objects throws a TypeError exception. To prevent the exception, ensure that both values share the same type.";
+            var types = pe.Message.Split(':')[1].Trim();
+            var message = Messages.UnsupportedOperandPythonExceptionInterpreter.InvalidObjectTypesForOperation(types);
+            if (types.Contains("'datetime.datetime'") && types.Contains("'datetime.date'"))
+            {
+                message += Messages.UnsupportedOperandPythonExceptionInterpreter.DatetimeDateOperationHint;
+            }
             message += PythonUtil.PythonExceptionStackParser(pe.StackTrace);
 
             return new Exception(message, pe);

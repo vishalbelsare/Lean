@@ -24,55 +24,53 @@ namespace QuantConnect.Data.Consolidators
     /// </summary>
     /// <remarks>This implementation replaced the original implementation that was shown to have inaccuracies in its representation
     /// of Renko charts. The original implementation has been moved to <see cref="ClassicRenkoConsolidator"/>.</remarks>
-    public class RenkoConsolidator : IDataConsolidator
+    public class RenkoConsolidator : ConsolidatorBase
     {
         private bool _firstTick = true;
         private RenkoBar _lastWicko;
-        private DataConsolidatedHandler _dataConsolidatedHandler;
         private RenkoBar _currentBar;
-        private IBaseData _consolidated;
         
         /// <summary>
         /// Time of consolidated close.
         /// </summary>
         /// <remarks>Protected for testing</remarks>
-        protected DateTime CloseOn;
+        protected DateTime CloseOn { get; set; }
 
         /// <summary>
         /// Value of consolidated close.
         /// </summary>
         /// <remarks>Protected for testing</remarks>
-        protected decimal CloseRate;
+        protected decimal CloseRate { get; set; }
 
         /// <summary>
         /// Value of consolidated high.
         /// </summary>
         /// <remarks>Protected for testing</remarks>
-        protected decimal HighRate;
+        protected decimal HighRate { get; set; }
 
         /// <summary>
         /// Value of consolidated low.
         /// </summary>
         /// <remarks>Protected for testing</remarks>
-        protected decimal LowRate;
+        protected decimal LowRate { get; set; }
 
         /// <summary>
         /// Time of consolidated open.
         /// </summary>
         /// <remarks>Protected for testing</remarks>
-        protected DateTime OpenOn;
+        protected DateTime OpenOn { get; set; }
 
         /// <summary>
         /// Value of consolidate open.
         /// </summary>
         /// <remarks>Protected for testing</remarks>
-        protected decimal OpenRate;
+        protected decimal OpenRate { get; set; }
 
         /// <summary>
         /// Size of the consolidated bar.
         /// </summary>
         /// <remarks>Protected for testing</remarks>
-        protected decimal BarSize;
+        protected decimal BarSize { get; set; }
 
         /// <summary>
         /// Gets the kind of the bar
@@ -82,41 +80,22 @@ namespace QuantConnect.Data.Consolidators
         /// <summary>
         /// Gets a clone of the data being currently consolidated
         /// </summary>
-        public IBaseData WorkingData => _currentBar?.Clone();
+        public override IBaseData WorkingData => _currentBar?.Clone();
 
         /// <summary>
         /// Gets the type consumed by this consolidator
         /// </summary>
-        public Type InputType => typeof(IBaseData);
+        public override Type InputType => typeof(IBaseData);
 
         /// <summary>
         /// Gets <see cref="RenkoBar"/> which is the type emitted in the <see cref="IDataConsolidator.DataConsolidated"/> event.
         /// </summary>
-        public Type OutputType => typeof(RenkoBar);
+        public override Type OutputType => typeof(RenkoBar);
 
         /// <summary>
-        /// Gets the most recently consolidated piece of data. This will be null if this consolidator
-        /// has not produced any data yet.
+        /// Typed event handler that fires when a new piece of data is produced
         /// </summary>
-        public IBaseData Consolidated
-        {
-            get { return _consolidated; }
-            private set { _consolidated = value; }
-        }
-
-        /// <summary>
-        /// Event handler that fires when a new piece of data is produced
-        /// </summary>
-        public event EventHandler<RenkoBar> DataConsolidated;
-
-        /// <summary>
-        /// Event handler that fires when a new piece of data is produced
-        /// </summary>
-        event DataConsolidatedHandler IDataConsolidator.DataConsolidated
-        {
-            add { _dataConsolidatedHandler += value; }
-            remove { _dataConsolidatedHandler -= value; }
-        }
+        public new event EventHandler<RenkoBar> DataConsolidated;
 
         /// <summary>
         /// Initializes a new instance of the <see cref="RenkoConsolidator"/> class using the specified <paramref name="barSize"/>.
@@ -124,6 +103,11 @@ namespace QuantConnect.Data.Consolidators
         /// <param name="barSize">The constant value size of each bar</param>
         public RenkoConsolidator(decimal barSize)
         {
+            if (barSize <= 0)
+            {
+                throw new ArgumentException("Renko consolidator BarSize must be strictly greater than zero");
+            }
+
             BarSize = barSize;
         }
 
@@ -131,7 +115,7 @@ namespace QuantConnect.Data.Consolidators
         /// Updates this consolidator with the specified data
         /// </summary>
         /// <param name="data">The new data for the consolidator</param>
-        public void Update(IBaseData data)
+        public override void Update(IBaseData data)
         {
             var rate = data.Price;
 
@@ -140,8 +124,7 @@ namespace QuantConnect.Data.Consolidators
                 _firstTick = false;
 
                 // Round our first rate to the same length as BarSize
-                var decimalPlaces = BitConverter.GetBytes(decimal.GetBits(BarSize)[3])[2];
-                rate = Math.Round(rate, decimalPlaces);
+                rate = GetClosestMultiple(rate, BarSize);
 
                 OpenOn = data.Time;
                 CloseOn = data.Time;
@@ -225,29 +208,46 @@ namespace QuantConnect.Data.Consolidators
         /// Scans this consolidator to see if it should emit a bar due to time passing
         /// </summary>
         /// <param name="currentLocalTime">The current time in the local time zone (same as <see cref="BaseData.Time"/>)</param>
-        public void Scan(DateTime currentLocalTime)
+        public override void Scan(DateTime currentLocalTime)
         {
         }
 
         /// <summary>Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged resources.</summary>
         /// <filterpriority>2</filterpriority>
-        public void Dispose()
+        public override void Dispose()
         {
             DataConsolidated = null;
-            _dataConsolidatedHandler = null;
+            base.Dispose();
         }
 
         /// <summary>
-        /// Event invocator for the DataConsolidated event. This should be invoked
-        /// by derived classes when they have consolidated a new piece of data.
+        /// Resets the consolidator
+        /// </summary>
+        public override void Reset()
+        {
+            _firstTick = true;
+            _lastWicko = null;
+            _currentBar = null;
+            CloseOn = default;
+            CloseRate = default;
+            HighRate = default;
+            LowRate = default;
+            OpenOn = default;
+            OpenRate = default;
+            base.Reset();
+        }
+
+        /// <summary>
+        /// Raises the strongly typed DataConsolidated event
         /// </summary>
         /// <param name="consolidated">The newly consolidated data</param>
-        protected void OnDataConsolidated(RenkoBar consolidated)
+        protected override void FireDataConsolidated(IBaseData consolidated)
         {
-            DataConsolidated?.Invoke(this, consolidated);
-            _currentBar = consolidated;
-            _dataConsolidatedHandler?.Invoke(this, consolidated);
-            Consolidated = consolidated;
+            var bar = (RenkoBar)consolidated;
+            // fire the typed event before updating the current bar so handlers reading
+            // WorkingData still see the previous bar, as they did before the rolling window
+            DataConsolidated?.Invoke(this, bar);
+            _currentBar = bar;
         }
 
         private void Rising(IBaseData data)
@@ -284,6 +284,25 @@ namespace QuantConnect.Data.Consolidators
                 OpenRate = limit;
                 HighRate = limit;
             }
+        }
+
+        /// <summary>
+        /// Gets the closest BarSize-Multiple to the price.
+        /// </summary>
+        /// <remarks>Based on: The Art of Computer Programming, Vol I, pag 39. Donald E. Knuth</remarks>
+        /// <param name="price">Price to be rounded to the closest BarSize-Multiple</param>
+        /// <param name="barSize">The size of the Renko bar</param>
+        /// <returns>The closest BarSize-Multiple to the price</returns>
+        public static decimal GetClosestMultiple(decimal price, decimal barSize)
+        {
+            if (barSize <= 0)
+            {
+                throw new ArgumentException("BarSize must be strictly greater than zero");
+            }
+
+            var modulus = price - barSize * Math.Floor(price / barSize);
+            var round = Math.Round(modulus / barSize);
+            return barSize * (Math.Floor(price / barSize) + round);
         }
     }
 

@@ -19,6 +19,7 @@ using QuantConnect.Orders.Fees;
 using QuantConnect.Securities;
 using QuantConnect.Util;
 using System.Collections.Generic;
+using System.Linq;
 
 namespace QuantConnect.Brokerages
 {
@@ -27,6 +28,14 @@ namespace QuantConnect.Brokerages
     /// </summary>
     public class FTXBrokerageModel : DefaultBrokerageModel
     {
+        private readonly HashSet<OrderType> _supportedOrderTypes = new HashSet<OrderType>
+        {
+            OrderType.Market,
+            OrderType.Limit,
+            OrderType.StopMarket,
+            OrderType.StopLimit
+        };
+
         private const decimal _defaultLeverage = 3m;
 
         /// <summary>
@@ -45,20 +54,6 @@ namespace QuantConnect.Brokerages
         /// <param name="accountType">Cash or Margin</param>
         public FTXBrokerageModel(AccountType accountType = AccountType.Margin) : base(accountType)
         {
-        }
-        
-        /// <summary>
-        /// Gets a new buying power model for the security, returning the default model with the security's configured leverage.
-        /// For cash accounts, leverage = 1 is used.
-        /// For margin trading, FTX supports up to 20x leverage, default is 3xs 
-        /// </summary>
-        /// <param name="security">The security to get a buying power model for</param>
-        /// <returns>The buying power model for this brokerage/security</returns>
-        public override IBuyingPowerModel GetBuyingPowerModel(Security security)
-        {
-            return AccountType == AccountType.Margin
-                ? new SecurityMarginModel(GetLeverage(security))
-                : new CashBuyingPowerModel();
         }
 
         /// <summary>
@@ -108,6 +103,11 @@ namespace QuantConnect.Brokerages
         /// <returns>True if the brokerage could process the order, false otherwise</returns>
         public override bool CanSubmitOrder(Security security, Order order, out BrokerageMessageEvent message)
         {
+            if (!this.ValidateContingentOrdersNotSupported(order, out message))
+            {
+                return false;
+            }
+
             if (!IsValidOrderSize(security, order.Quantity, out message))
             {
                 return false;
@@ -115,13 +115,21 @@ namespace QuantConnect.Brokerages
 
             message = null;
 
+            // validate order type
+            if (!_supportedOrderTypes.Contains(order.Type))
+            {
+                message = new BrokerageMessageEvent(BrokerageMessageType.Warning, "NotSupported",
+                    Messages.DefaultBrokerageModel.UnsupportedOrderType(this, order, _supportedOrderTypes));
+
+                return false;
+            }
+
             if (order.Type is OrderType.StopMarket or OrderType.StopLimit)
             {
                 if (!security.HasData)
                 {
                     message = new BrokerageMessageEvent(BrokerageMessageType.Warning, "NotSupported",
-                        "There is no data for this symbol yet, please check the security.HasData flag to ensure there is at least one data point."
-                    );
+                        Messages.DefaultBrokerageModel.NoDataForSymbol);
 
                     return false;
                 }
@@ -138,8 +146,7 @@ namespace QuantConnect.Brokerages
                         if (stopPrice > security.BidPrice)
                         {
                             message = new BrokerageMessageEvent(BrokerageMessageType.Warning, "NotSupported",
-                                StringExtensions.Invariant($"Trigger price too high: must be below current market price.")
-                            );
+                                Messages.FTXBrokerageModel.TriggerPriceTooHigh);
                         }
                         break;
 
@@ -147,8 +154,7 @@ namespace QuantConnect.Brokerages
                         if (stopPrice < security.AskPrice)
                         {
                             message = new BrokerageMessageEvent(BrokerageMessageType.Warning, "NotSupported",
-                                StringExtensions.Invariant($"Trigger price too low: must be above current market price.")
-                            );
+                                Messages.FTXBrokerageModel.TriggerPriceTooLow);
                         }
                         break;
                 }
@@ -162,8 +168,7 @@ namespace QuantConnect.Brokerages
             if (security.Type != SecurityType.Crypto)
             {
                 message = new BrokerageMessageEvent(BrokerageMessageType.Warning, "NotSupported",
-                    StringExtensions.Invariant($"The {this.GetType().Name} does not support {security.Type} security type.")
-                );
+                    Messages.DefaultBrokerageModel.UnsupportedSecurityType(this, security));
 
                 return false;
             }
@@ -182,14 +187,13 @@ namespace QuantConnect.Brokerages
         /// <returns>True if the brokerage would allow updating the order, false otherwise</returns>
         public override bool CanUpdateOrder(Security security, Order order, UpdateOrderRequest request, out BrokerageMessageEvent message)
         {
-            message =
-                new BrokerageMessageEvent(
-                    BrokerageMessageType.Warning,
-                    0,
-                    "You must cancel and re-create instead.");
+            message = new BrokerageMessageEvent(BrokerageMessageType.Warning, 0, Messages.DefaultBrokerageModel.OrderUpdateNotSupported);
             return false;
         }
 
+        /// <summary>
+        /// Returns a readonly dictionary of FTX default markets
+        /// </summary>
         protected static IReadOnlyDictionary<SecurityType, string> GetDefaultMarkets(string market)
         {
             var map = DefaultMarketMap.ToDictionary();

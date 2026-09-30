@@ -1,4 +1,4 @@
-/* 
+/*
  * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
  * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
  *
@@ -44,9 +44,17 @@ namespace QuantConnect.Algorithm.CSharp
             future.SetFilter(TimeSpan.FromDays(0), TimeSpan.FromDays(90));
         }
 
-        public override void OnData(Slice data)
+        public override void OnData(Slice slice)
         {
-            foreach (var chain in data.FutureChains)
+            foreach (var point in slice)
+            {
+                if (point.Value.IsFillForward)
+                {
+                    throw new RegressionTestException("We requested no fill forwarding!");
+                }
+            }
+
+            foreach (var chain in slice.FutureChains)
             {
                 _receivedData = true;
 
@@ -54,7 +62,7 @@ namespace QuantConnect.Algorithm.CSharp
                 {
                     if (contract.Expiry.Date < Time.Date)
                     {
-                        throw new Exception($"Received expired contract {contract} expired: {contract.Expiry} current time: {Time}");
+                        throw new RegressionTestException($"Received expired contract {contract} expired: {contract.Expiry} current time: {Time}");
                     }
                 }
             }
@@ -64,7 +72,7 @@ namespace QuantConnect.Algorithm.CSharp
         {
             if (!_receivedData)
             {
-                throw new Exception("No Futures chains were received in this regression");
+                throw new RegressionTestException("No Futures chains were received in this regression");
             }
         }
 
@@ -76,21 +84,39 @@ namespace QuantConnect.Algorithm.CSharp
         /// <summary>
         /// This is used by the regression test system to indicate which languages this algorithm is written in.
         /// </summary>
-        public Language[] Languages { get; } = { Language.CSharp };
+        public List<Language> Languages { get; } = new() { Language.CSharp };
+
+        /// <summary>
+        /// Data Points count of all timeslices of algorithm
+        /// </summary>
+        public long DataPoints => 35128;
+
+        /// <summary>
+        /// Data Points count of the algorithm history
+        /// </summary>
+        public int AlgorithmHistoryDataPoints => 0;
+
+        /// <summary>
+        /// Final status of the algorithm
+        /// </summary>
+        public AlgorithmStatus AlgorithmStatus => AlgorithmStatus.Completed;
 
         /// <summary>
         /// This is used by the regression test system to indicate what the expected statistics are from running the algorithm
         /// </summary>
         public Dictionary<string, string> ExpectedStatistics => new Dictionary<string, string>
         {
-            {"Total Trades", "0"},
+            {"Total Orders", "0"},
             {"Average Win", "0%"},
             {"Average Loss", "0%"},
             {"Compounding Annual Return", "0%"},
             {"Drawdown", "0%"},
             {"Expectancy", "0"},
+            {"Start Equity", "1000000"},
+            {"End Equity", "1000000"},
             {"Net Profit", "0%"},
             {"Sharpe Ratio", "0"},
+            {"Sortino Ratio", "0"},
             {"Probabilistic Sharpe Ratio", "0%"},
             {"Loss Rate", "0%"},
             {"Win Rate", "0%"},
@@ -105,25 +131,8 @@ namespace QuantConnect.Algorithm.CSharp
             {"Total Fees", "$0.00"},
             {"Estimated Strategy Capacity", "$0"},
             {"Lowest Capacity Asset", ""},
-            {"Fitness Score", "0"},
-            {"Kelly Criterion Estimate", "0"},
-            {"Kelly Criterion Probability Value", "0"},
-            {"Sortino Ratio", "79228162514264337593543950335"},
-            {"Return Over Maximum Drawdown", "79228162514264337593543950335"},
-            {"Portfolio Turnover", "0"},
-            {"Total Insights Generated", "0"},
-            {"Total Insights Closed", "0"},
-            {"Total Insights Analysis Completed", "0"},
-            {"Long Insight Count", "0"},
-            {"Short Insight Count", "0"},
-            {"Long/Short Ratio", "100%"},
-            {"Estimated Monthly Alpha Value", "$0"},
-            {"Total Accumulated Estimated Alpha Value", "$0"},
-            {"Mean Population Estimated Insight Value", "$0"},
-            {"Mean Population Direction", "0%"},
-            {"Mean Population Magnitude", "0%"},
-            {"Rolling Averaged Population Direction", "0%"},
-            {"Rolling Averaged Population Magnitude", "0%"},
+            {"Portfolio Turnover", "0%"},
+            {"Drawdown Recovery", "0"},
             {"OrderListHash", "d41d8cd98f00b204e9800998ecf8427e"}
         };
     }

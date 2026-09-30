@@ -14,13 +14,14 @@
  */
 
 using System;
-using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
-using System.Threading.Tasks;
 using QuantConnect.Data;
-using QuantConnect.Logging;
 using QuantConnect.Util;
+using QuantConnect.Logging;
+using System.Threading.Tasks;
+using System.Collections.Generic;
+using System.Runtime.CompilerServices;
 
 namespace QuantConnect.Brokerages
 {
@@ -76,15 +77,15 @@ namespace QuantConnect.Brokerages
             _subscribeFunc = subscribeFunc;
             _unsubscribeFunc = unsubscribeFunc;
             _messageHandler = messageHandler;
-            _connectionRateLimiter = connectionRateLimiter;
+            // let's use a reasonable default, no API will like to get DOS on reconnections. 50 WS will take 120s
+            _connectionRateLimiter = connectionRateLimiter ?? new RateGate(5, TimeSpan.FromSeconds(12));
 
             if (_maximumWebSocketConnections > 0)
             {
                 // symbol weighting enabled, create all websocket instances
                 for (var i = 0; i < _maximumWebSocketConnections; i++)
                 {
-                    var webSocket = _webSocketFactory();
-                    webSocket.Open += OnOpen;
+                    var webSocket = CreateWebSocket();
 
                     _webSocketEntries.Add(new BrokerageMultiWebSocketEntry(symbolWeights, webSocket));
                 }
@@ -99,25 +100,26 @@ namespace QuantConnect.Brokerages
                 };
                 _reconnectTimer.Elapsed += (_, _) =>
                 {
-                    Log.Trace("BrokerageMultiWebSocketSubscriptionManager(): Restarting websocket connections");
-
+                    List<BrokerageMultiWebSocketEntry> webSocketEntries;
                     lock (_locker)
                     {
-                        foreach (var entry in _webSocketEntries)
-                        {
-                            if (entry.WebSocket.IsOpen)
-                            {
-                                Task.Factory.StartNew(() =>
-                                {
-                                    Log.Trace($"BrokerageMultiWebSocketSubscriptionManager(): Websocket restart - disconnect: ({entry.WebSocket.GetHashCode()})");
-                                    Disconnect(entry.WebSocket);
-
-                                    Log.Trace($"BrokerageMultiWebSocketSubscriptionManager(): Websocket restart - connect: ({entry.WebSocket.GetHashCode()})");
-                                    Connect(entry.WebSocket);
-                                });
-                            }
-                        }
+                        // let's make a copy so we don't hold the lock
+                        webSocketEntries = _webSocketEntries.ToList();
                     }
+
+                    Log.Trace($"BrokerageMultiWebSocketSubscriptionManager(): Restarting {webSocketEntries.Count} websocket connections");
+
+                    Parallel.ForEach(webSocketEntries, new ParallelOptions { MaxDegreeOfParallelism = 4 }, entry =>
+                    {
+                        if (entry.WebSocket.IsOpen)
+                        {
+                            Log.Trace($"BrokerageMultiWebSocketSubscriptionManager(): Websocket restart - disconnect: ({entry.WebSocket.GetHashCode()})");
+                            Disconnect(entry.WebSocket);
+
+                            Log.Trace($"BrokerageMultiWebSocketSubscriptionManager(): Websocket restart - connect: ({entry.WebSocket.GetHashCode()})");
+                            Connect(entry.WebSocket);
+                        }
+                    });
                 };
                 _reconnectTimer.Start();
 
@@ -174,10 +176,27 @@ namespace QuantConnect.Brokerages
         /// <summary>
         /// Performs application-defined tasks associated with freeing, releasing, or resetting unmanaged resources.
         /// </summary>
-        public void Dispose()
+        public override void Dispose()
         {
             _reconnectTimer?.Stop();
             _reconnectTimer.DisposeSafely();
+            lock (_locker)
+            {
+                foreach (var entry in _webSocketEntries)
+                {
+                    try
+                    {
+                        entry.WebSocket.Open -= OnOpen;
+                        entry.WebSocket.Message -= EventHandler;
+                        entry.WebSocket.Close();
+                    }
+                    catch (Exception ex)
+                    {
+                        Log.Error(ex);
+                    }
+                }
+                _webSocketEntries.Clear();
+            }
         }
 
         private BrokerageMultiWebSocketEntry GetWebSocketEntryBySymbol(Symbol symbol)
@@ -210,8 +229,7 @@ namespace QuantConnect.Brokerages
                     }
 
                     // symbol limit reached on all, create new websocket instance
-                    var webSocket = _webSocketFactory();
-                    webSocket.Open += OnOpen;
+                    var webSocket = CreateWebSocket();
 
                     _webSocketEntries.Add(new BrokerageMultiWebSocketEntry(webSocket));
                 }
@@ -239,11 +257,28 @@ namespace QuantConnect.Brokerages
             return entry.WebSocket;
         }
 
+        /// <summary>
+        /// When we create a websocket we will subscribe to it's events once and initialize it
+        /// </summary>
+        /// <remarks>Note that the websocket is no connected yet <see cref="Connect(IWebSocket)"/></remarks>
+        private IWebSocket CreateWebSocket()
+        {
+            var webSocket = _webSocketFactory();
+            webSocket.Open += OnOpen;
+            webSocket.Message += EventHandler;
+            webSocket.Initialize(_webSocketUrl);
+
+            return webSocket;
+        }
+
+        [MethodImpl(MethodImplOptions.AggressiveInlining)]
+        private void EventHandler(object _, WebSocketMessage message)
+        {
+            _messageHandler(message);
+        }
+
         private void Connect(IWebSocket webSocket)
         {
-            webSocket.Initialize(_webSocketUrl);
-            webSocket.Message += (s, e) => _messageHandler(e);
-
             var connectedEvent = new ManualResetEvent(false);
             EventHandler onOpenAction = (_, _) =>
             {
@@ -252,10 +287,7 @@ namespace QuantConnect.Brokerages
 
             webSocket.Open += onOpenAction;
 
-            if (_connectionRateLimiter is { IsRateLimited: false })
-            {
-                _connectionRateLimiter.WaitToProceed();
-            }
+            _connectionRateLimiter.WaitToProceed();
 
             try
             {
@@ -298,6 +330,7 @@ namespace QuantConnect.Brokerages
                                 _subscribeFunc(webSocket, symbol);
                             }
                         });
+                        break;
                     }
                 }
             }

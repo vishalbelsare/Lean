@@ -1,4 +1,4 @@
-﻿/*
+/*
  * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
  * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
  *
@@ -51,15 +51,20 @@ namespace QuantConnect.Tests.Engine.Setup
         [Test]
         public void HandlesErrorOnInitializeCorrectly()
         {
-            var setupHandler = new BacktestingSetupHandler();
+            using var setupHandler = new BacktestingSetupHandler();
 
-            Assert.IsFalse(setupHandler.Setup(new SetupHandlerParameters(_dataManager.UniverseSelection, _algorithm,
-                null, new BacktestNodePacket(), new TestResultHandler(),
-                null, new BacktestingRealTimeHandler(), null, TestGlobals.DataProvider)));
+            var packet = new BacktestNodePacket();
+            packet.Controls.RamAllocation = 1024 * 4;
+            var realTimeHandler = new BacktestingRealTimeHandler();
+            var resultHandler = new TestResultHandler();
+            Assert.IsFalse(setupHandler.Setup(new SetupHandlerParameters(_dataManager.UniverseSelection, _algorithm, null, packet,
+                resultHandler, null, realTimeHandler, TestGlobals.DataCacheProvider, TestGlobals.MapFileProvider)));
 
+            resultHandler.Exit();
+            realTimeHandler.Exit();
             setupHandler.DisposeSafely();
             Assert.AreEqual(1, setupHandler.Errors.Count);
-            Assert.IsTrue(setupHandler.Errors[0].InnerException.Message.Equals("Some failure"));
+            Assert.IsTrue(setupHandler.Errors[0].InnerException.Message.Equals("Some failure", StringComparison.OrdinalIgnoreCase));
         }
 
         internal class TestAlgorithmThrowsOnInitialize : AlgorithmStub
@@ -71,7 +76,7 @@ namespace QuantConnect.Tests.Engine.Setup
                 SetStartDate(2018, 08, 17);
                 SetEndDate(2021, 11, 15);
 
-                // this will fail later because due to default crypto market being GDAX there is no conversion rate route
+                // this will fail later because due to default crypto market being Coinbase there is no conversion rate route
                 var symbols = new[] { "ADAUSDT", "BNBUSDT", "BTCUSDT", "ETHUSDT", "LTCUSDT", "SOLUSDT" }
                     .Select(ticker => QuantConnect.Symbol.Create(ticker, SecurityType.Crypto, Market.Binance));
                 SetUniverseSelection(new ManualUniverseSelectionModel(symbols));

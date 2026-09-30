@@ -43,11 +43,12 @@ namespace QuantConnect.ToolBox.RandomDataGenerator
         public double HasIpoPercentage { get; init; }
         public double HasRenamePercentage { get; init; }
         public double HasSplitsPercentage { get; init; }
+        public double MonthSplitPercentage { get; init; }
         public double HasDividendsPercentage { get; init; }
         public double DividendEveryQuarterPercentage { get; init; }
         public string OptionPriceEngineName { get; init; }
         public int ChainSymbolCount { get; init; } = 1;
-        public Resolution VolatilityModelResolution{ get; init; } = Resolution.Daily;
+        public Resolution VolatilityModelResolution { get; init; } = Resolution.Daily;
         public List<string> Tickers { get; init; }
         public static RandomDataGeneratorSettings FromCommandLineArguments(
             string startDateString,
@@ -68,7 +69,8 @@ namespace QuantConnect.ToolBox.RandomDataGenerator
             string optionPriceEngineName,
             string volatilityModelResolutionString,
             string chainSymbolCountString,
-            List<string> tickers
+            List<string> tickers,
+            double monthSplitPercentage = 5.0
             )
         {
             var randomSeedSet = true;
@@ -194,7 +196,7 @@ namespace QuantConnect.ToolBox.RandomDataGenerator
             else if (!bool.TryParse(includeCoarseString, out includeCoarse))
             {
                 failed = true;
-                Log.Error($"RandomDataGeneratorSettings(): Optional parameter --include-coarse was incorrectly formated. Please specify a valid boolean. Value provided: '{includeCoarseString}'. Valid values: 'true' or 'false'");
+                Log.Error($"RandomDataGeneratorSettings(): Optional parameter --include-coarse was incorrectly formatted. Please specify a valid boolean. Value provided: '{includeCoarseString}'. Valid values: 'true' or 'false'");
             }
             else if (includeCoarse && securityType != SecurityType.Equity)
             {
@@ -205,13 +207,17 @@ namespace QuantConnect.ToolBox.RandomDataGenerator
             if (string.IsNullOrEmpty(dataDensityString))
             {
                 dataDensity = DataDensity.Dense;
+                if (securityType == SecurityType.Option)
+                {
+                    dataDensity = DataDensity.Sparse;
+                }
                 Log.Trace($"RandomDataGeneratorSettings(): Using default value of '{dataDensity}' for --data-density");
             }
             else if (!Enum.TryParse(dataDensityString, true, out dataDensity))
             {
                 var validValues = string.Join(", ", Enum.GetValues(typeof(DataDensity))).Cast<DataDensity>();
                 failed = true;
-                Log.Error($"RandomDataGeneratorSettings(): Optional parameter --data-density was incorrectly formated. Please specify a valid DataDensity. Value provided: '{dataDensityString}'. Valid values: {validValues}");
+                Log.Error($"RandomDataGeneratorSettings(): Optional parameter --data-density was incorrectly formatted. Please specify a valid DataDensity. Value provided: '{dataDensityString}'. Valid values: {validValues}");
             }
 
             // --quote-trade-ratio
@@ -319,6 +325,7 @@ namespace QuantConnect.ToolBox.RandomDataGenerator
                 HasIpoPercentage = hasIpoPercentage,
                 HasRenamePercentage = hasRenamePercentage,
                 HasSplitsPercentage = hasSplitsPercentage,
+                MonthSplitPercentage = monthSplitPercentage,
                 HasDividendsPercentage = hasDividendsPercentage,
                 DividendEveryQuarterPercentage = dividendEveryQuarterPercentage,
                 OptionPriceEngineName = optionPriceEngineName,

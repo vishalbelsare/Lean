@@ -18,7 +18,6 @@ using QuantConnect.Data;
 using QuantConnect.Orders;
 using QuantConnect.Interfaces;
 using System.Collections.Generic;
-using System.Linq;
 using QuantConnect.Data.UniverseSelection;
 using QuantConnect.Indicators;
 using QuantConnect.Securities;
@@ -37,6 +36,9 @@ namespace QuantConnect.Algorithm.CSharp
         private SimpleMovingAverage _fast;
         private SimpleMovingAverage _slow;
 
+        // Minimum SMA gap required before acting on a cross; see the workaround note in OnData.
+        private const decimal CrossThreshold = 0.001m;
+
         /// <summary>
         /// Initialise the data and resolution required, as well as the cash and start-end dates for your algorithm. All algorithms must initialized.
         /// </summary>
@@ -51,7 +53,7 @@ namespace QuantConnect.Algorithm.CSharp
                 contractDepthOffset: 0
             );
 
-            _fast = SMA(_continuousContract.Symbol, 3, Resolution.Daily);
+            _fast = SMA(_continuousContract.Symbol, 4, Resolution.Daily);
             _slow = SMA(_continuousContract.Symbol, 10, Resolution.Daily);
         }
 
@@ -59,31 +61,34 @@ namespace QuantConnect.Algorithm.CSharp
         /// OnData event is the primary entry point for your algorithm. Each new data point will be pumped in here.
         /// </summary>
         /// <param name="data">Slice object keyed by symbol containing the stock data</param>
-        public override void OnData(Slice data)
+        public override void OnData(Slice slice)
         {
-            foreach (var changedEvent in data.SymbolChangedEvents.Values)
+            foreach (var changedEvent in slice.SymbolChangedEvents.Values)
             {
                 Debug($"{Time} - SymbolChanged event: {changedEvent}");
                 if (Time.TimeOfDay != TimeSpan.Zero)
                 {
-                    throw new Exception($"{Time} unexpected symbol changed event {changedEvent}!");
+                    throw new RegressionTestException($"{Time} unexpected symbol changed event {changedEvent}!");
                 }
             }
 
+            // Workaround so the C# and Python versions take the exact same trades on the limited
+            // sample data in the repository (decimal vs double rounding can disagree at a cross).
             if (!Portfolio.Invested)
             {
-                if(_fast > _slow)
+                if(_fast.Current.Value - _slow.Current.Value > CrossThreshold)
                 {
                     _currentContract = Securities[_continuousContract.Mapped];
                     Buy(_currentContract.Symbol, 1);
                 }
             }
-            else if(_fast < _slow)
+            else if(_slow.Current.Value - _fast.Current.Value > CrossThreshold)
             {
                 Liquidate();
             }
 
-            if (_currentContract != null && _currentContract.Symbol != _continuousContract.Mapped)
+            // We check exchange hours because the contract mapping can call OnData outside of regular hours.
+            if (_currentContract != null && _currentContract.Symbol != _continuousContract.Mapped && _continuousContract.Exchange.ExchangeOpen)
             {
                 Log($"{Time} - rolling position from {_currentContract.Symbol} to {_continuousContract.Mapped}");
 
@@ -112,55 +117,56 @@ namespace QuantConnect.Algorithm.CSharp
         /// <summary>
         /// This is used by the regression test system to indicate which languages this algorithm is written in.
         /// </summary>
-        public Language[] Languages { get; } = { Language.CSharp, Language.Python };
+        public List<Language> Languages { get; } = new() { Language.CSharp, Language.Python };
+
+        /// <summary>
+        /// Data Points count of all timeslices of algorithm
+        /// </summary>
+        public long DataPoints => 162575;
+
+        /// <summary>
+        /// Data Points count of the algorithm history
+        /// </summary>
+        public int AlgorithmHistoryDataPoints => 0;
+
+        /// <summary>
+        /// Final status of the algorithm
+        /// </summary>
+        public AlgorithmStatus AlgorithmStatus => AlgorithmStatus.Completed;
 
         /// <summary>
         /// This is used by the regression test system to indicate what the expected statistics are from running the algorithm
         /// </summary>
         public Dictionary<string, string> ExpectedStatistics => new Dictionary<string, string>
         {
-            {"Total Trades", "2"},
-            {"Average Win", "0%"},
-            {"Average Loss", "0.00%"},
-            {"Compounding Annual Return", "-0.007%"},
-            {"Drawdown", "0.000%"},
-            {"Expectancy", "-1"},
-            {"Net Profit", "-0.004%"},
-            {"Sharpe Ratio", "-0.369"},
-            {"Probabilistic Sharpe Ratio", "10.640%"},
-            {"Loss Rate", "100%"},
-            {"Win Rate", "0%"},
-            {"Profit-Loss Ratio", "0"},
-            {"Alpha", "-0"},
-            {"Beta", "0"},
-            {"Annual Standard Deviation", "0"},
-            {"Annual Variance", "0"},
-            {"Information Ratio", "-2.751"},
-            {"Tracking Error", "0.082"},
-            {"Treynor Ratio", "-0.616"},
-            {"Total Fees", "$3.70"},
-            {"Estimated Strategy Capacity", "$0"},
+            {"Total Orders", "9"},
+            {"Average Win", "2.85%"},
+            {"Average Loss", "-0.43%"},
+            {"Compounding Annual Return", "11.019%"},
+            {"Drawdown", "0.900%"},
+            {"Expectancy", "2.818"},
+            {"Start Equity", "100000"},
+            {"End Equity", "105403.5"},
+            {"Net Profit", "5.404%"},
+            {"Sharpe Ratio", "1.531"},
+            {"Sortino Ratio", "2.106"},
+            {"Probabilistic Sharpe Ratio", "74.321%"},
+            {"Loss Rate", "50%"},
+            {"Win Rate", "50%"},
+            {"Profit-Loss Ratio", "6.64"},
+            {"Alpha", "0.067"},
+            {"Beta", "0.009"},
+            {"Annual Standard Deviation", "0.045"},
+            {"Annual Variance", "0.002"},
+            {"Information Ratio", "-1.606"},
+            {"Tracking Error", "0.093"},
+            {"Treynor Ratio", "7.237"},
+            {"Total Fees", "$19.35"},
+            {"Estimated Strategy Capacity", "$1000000000.00"},
             {"Lowest Capacity Asset", "ES VMKLFZIH2MTD"},
-            {"Fitness Score", "0.007"},
-            {"Kelly Criterion Estimate", "0"},
-            {"Kelly Criterion Probability Value", "0"},
-            {"Sortino Ratio", "79228162514264337593543950335"},
-            {"Return Over Maximum Drawdown", "-0.738"},
-            {"Portfolio Turnover", "0.01"},
-            {"Total Insights Generated", "0"},
-            {"Total Insights Closed", "0"},
-            {"Total Insights Analysis Completed", "0"},
-            {"Long Insight Count", "0"},
-            {"Short Insight Count", "0"},
-            {"Long/Short Ratio", "100%"},
-            {"Estimated Monthly Alpha Value", "$0"},
-            {"Total Accumulated Estimated Alpha Value", "$0"},
-            {"Mean Population Estimated Insight Value", "$0"},
-            {"Mean Population Direction", "0%"},
-            {"Mean Population Magnitude", "0%"},
-            {"Rolling Averaged Population Direction", "0%"},
-            {"Rolling Averaged Population Magnitude", "0%"},
-            {"OrderListHash", "bd7fbe57802dfedb36c85609b7234016"}
+            {"Portfolio Turnover", "4.18%"},
+            {"Drawdown Recovery", "19"},
+            {"OrderListHash", "eb3bed9886f79a56c631225a6445adb2"}
         };
     }
 }

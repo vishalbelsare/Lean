@@ -19,7 +19,6 @@ using QuantConnect.Interfaces;
 using System;
 using System.Linq;
 using QuantConnect.Configuration;
-using QuantConnect.ToolBox.BitfinexDownloader;
 
 namespace QuantConnect.Tests.ToolBox
 {
@@ -36,44 +35,19 @@ namespace QuantConnect.Tests.ToolBox
                 .Where(p => type.IsAssignableFrom(p) && p.IsClass && !p.IsAbstract)
                 .ToList();
 
-            Assert.NotZero(types.Count);
-
-            types.ForEach(t =>
-            {
-                Assert.NotNull(t.GetConstructor(Type.EmptyTypes));
-            });            
+            Assert.Zero(types.Count);       
         }
 
-        [TestCase("--app=ydl --tickers=AAPL --resolution=Daily --from-date=20200820-00:00:00 --to-date=20200830-00:00:00", 1)]
-        [TestCase("--app=ydl --resolution=Daily --from-date=20200820-00:00:00 --to-date=20200830-00:00:00", 0)]
-        [TestCase("--app=ydl --tickers=AAPL,SPY,TSLA --resolution=Daily --from-date=20200820-00:00:00 --to-date=20200830-00:00:00", 3)]
-        public void CanParseTickersCorrectly(string args, int expectedCount)
+        [TestCase("--app=RDG --tickers=AAPL --resolution=Daily --from-date=20200820-00:00:00 --to-date=20200830-00:00:00", 1)]
+        [TestCase("--app=RDG --resolution=Daily --from-date=20200820-00:00:00 --to-date=20200830-00:00:00", 0)]
+        [TestCase("--app=RDG --tickers=AAPL,SPY,TSLA --resolution=Daily --from-date=20200820-00:00:00 --to-date=20200830-00:00:00", 3)]
+        [TestCase("--app=RDG --tickers=ES --security-type=Future --resolution=Minute --destination-dir=/Lean/Data", 1)]
+        public void CanParseTickersCorrectly(string args, int expectedTcikerCount)
         {
             var options = ToolboxArgumentParser.ParseArguments(args.Split(' '));
             var tickers = ToolboxArgumentParser.GetTickers(options);
 
-            Assert.AreEqual(expectedCount, tickers.Count);
-        }
-
-        [TestCase("--app=BFXDL --from-date=20171101-00:00:00 --tickers=1INCHUSD --resolution=Minute", 1)]
-        [TestCase("--app=BFXDL --from-date=20171101-00:00:00 --tickers=1INCHUSD,ADAUSDT --resolution=Minute", 2)]
-        [TestCase("--app=BFXDL --from-date=20171101-00:00:00 --tickers=1INCHUSD,tADAUST --resolution=Minute", 2)]
-        public void CanParseBitfinexTickersCorrectly(string args, int expectedCount)
-        {
-            var options = ToolboxArgumentParser.ParseArguments(args.Split(' '));
-            var tickers = ToolboxArgumentParser.GetTickers(options);
-
-            using var downloader = new BitfinexDataDownloader();
-            var count = 0;
-            foreach (var ticker in tickers)
-            {
-                if (!string.IsNullOrEmpty(downloader.GetSymbol(ticker)))
-                {
-                    count++;
-                }
-            }
-
-            Assert.AreEqual(expectedCount, count);
+            Assert.AreEqual(expectedTcikerCount, tickers.Count);
         }
     }
 }

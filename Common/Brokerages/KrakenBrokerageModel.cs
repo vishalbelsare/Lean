@@ -32,7 +32,16 @@ namespace QuantConnect.Brokerages
         private readonly List<string> _fiatsAvailableMargin = new() {"USD", "EUR"};
         private readonly List<string> _onlyFiatsAvailableMargin = new() {"BTC", "USDT", "USDC"};
         private readonly List<string> _ethAvailableMargin = new() {"REP", "XTZ", "ADA", "EOS", "TRX", "LINK" };
-        
+
+        private readonly HashSet<OrderType> _supportedOrderTypes = new()
+        {
+            OrderType.Limit,
+            OrderType.Market,
+            OrderType.StopMarket,
+            OrderType.StopLimit,
+            OrderType.LimitIfTouched
+        };
+
         /// <summary>
         /// Gets a map of the default markets to be used for each security type
         /// </summary>
@@ -54,7 +63,7 @@ namespace QuantConnect.Brokerages
             {"LTC", 3},
             {"ADA", 3}, // eth available
             {"EOS", 3}, // eth available
-            {"DASH", 3}, 
+            {"DASH", 3},
             {"TRX", 3}, // eth available
             {"LINK", 3}, // eth available
             {"USDC", 3}, // only with fiats
@@ -66,7 +75,7 @@ namespace QuantConnect.Brokerages
         /// <param name="accountType">Cash or Margin</param>
         public KrakenBrokerageModel(AccountType accountType = AccountType.Cash) : base(accountType)
         {
-            
+
         }
 
         /// <summary>
@@ -82,6 +91,11 @@ namespace QuantConnect.Brokerages
         /// <returns>True if the brokerage could process the order, false otherwise</returns>
         public override bool CanSubmitOrder(Security security, Order order, out BrokerageMessageEvent message)
         {
+            if (!this.ValidateContingentOrdersNotSupported(order, out message))
+            {
+                return false;
+            }
+
             if (!IsValidOrderSize(security, order.Quantity, out message))
             {
                 return false;
@@ -91,21 +105,19 @@ namespace QuantConnect.Brokerages
             if (security.Type != SecurityType.Crypto)
             {
                 message = new BrokerageMessageEvent(BrokerageMessageType.Warning, "NotSupported",
-                    StringExtensions.Invariant($"The {nameof(KrakenBrokerageModel)} does not support {security.Type} security type.")
-                );
+                    Messages.DefaultBrokerageModel.UnsupportedSecurityType(this, security));
 
                 return false;
             }
-            
-            if (order.Type == OrderType.MarketOnClose || order.Type == OrderType.MarketOnOpen || order.Type == OrderType.OptionExercise)
+
+            if (!_supportedOrderTypes.Contains(order.Type))
             {
                 message = new BrokerageMessageEvent(BrokerageMessageType.Warning, "NotSupported",
-                    StringExtensions.Invariant($"{order.Type} orders are not supported by Kraken.")
-                );
+                    Messages.DefaultBrokerageModel.UnsupportedOrderType(this, order, _supportedOrderTypes));
 
                 return false;
             }
-            
+
             return base.CanSubmitOrder(security, order, out message);
         }
 
@@ -119,7 +131,7 @@ namespace QuantConnect.Brokerages
         /// <returns>Always false as Kraken does not support update of orders</returns>
         public override bool CanUpdateOrder(Security security, Order order, UpdateOrderRequest request, out BrokerageMessageEvent message)
         {
-            message = new BrokerageMessageEvent(BrokerageMessageType.Warning, 0, "Brokerage does not support update. You must cancel and re-create instead."); ;
+            message = new BrokerageMessageEvent(BrokerageMessageType.Warning, 0, Messages.DefaultBrokerageModel.OrderUpdateNotSupported);
             return false;
         }
 
@@ -131,23 +143,6 @@ namespace QuantConnect.Brokerages
         public override IFeeModel GetFeeModel(Security security)
         {
             return new KrakenFeeModel();
-        }
-
-        /// <summary>
-        /// Gets a new buying power model for the security, returning the default model with the security's configured leverage.
-        /// For cash accounts, leverage = 1 is used.
-        /// For margin trading, max leverage = 5
-        /// </summary>
-        /// <param name="security">The security to get a buying power model for</param>
-        /// <returns>The buying power model for this brokerage/security</returns>
-        public override IBuyingPowerModel GetBuyingPowerModel(Security security)
-        {
-            if (AccountType == AccountType.Margin)
-            {
-                return new SecurityMarginModel(GetLeverage(security));
-            }
-                   
-            return new CashBuyingPowerModel();
         }
 
         /// <summary>
@@ -196,7 +191,7 @@ namespace QuantConnect.Brokerages
             var symbol = Symbol.Create("BTCUSD", SecurityType.Crypto, Market.Kraken);
             return SecurityBenchmark.CreateInstance(securities, symbol);
         }
-        
+
         /// <summary>
         /// Get default markets and specify Kraken as crypto market
         /// </summary>

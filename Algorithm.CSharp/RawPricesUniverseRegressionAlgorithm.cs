@@ -16,6 +16,7 @@
 using QuantConnect.Data.UniverseSelection;
 using QuantConnect.Interfaces;
 using QuantConnect.Orders.Fees;
+using QuantConnect.Securities;
 using System;
 using System.Collections.Generic;
 
@@ -43,8 +44,11 @@ namespace QuantConnect.Algorithm.CSharp
             SetEndDate(2014,4,7);
             SetCash(50000);
 
-            // Set the security initializer with zero fees
-            SetSecurityInitializer(x => x.SetFeeModel(new ConstantFeeModel(0)));
+            // Set the security initializer with zero fees and price initial seed
+            var securitySeeder = new FuncSecuritySeeder(GetLastKnownPrices);
+            SetSecurityInitializer(new CompositeSecurityInitializer(
+                new FuncSecurityInitializer(x => x.SetFeeModel(new ConstantFeeModel(0))),
+                new FuncSecurityInitializer(security => securitySeeder.SeedSecurity(security))));
 
             AddUniverse("MyUniverse", Resolution.Daily, SelectionFunction);
         }
@@ -82,55 +86,56 @@ namespace QuantConnect.Algorithm.CSharp
         /// <summary>
         /// This is used by the regression test system to indicate which languages this algorithm is written in.
         /// </summary>
-        public Language[] Languages { get; } = { Language.CSharp, Language.Python };
+        public List<Language> Languages { get; } = new() { Language.CSharp, Language.Python };
+
+        /// <summary>
+        /// Data Points count of all timeslices of algorithm
+        /// </summary>
+        public long DataPoints => 156;
+
+        /// <summary>
+        /// Data Points count of the algorithm history
+        /// </summary>
+        public int AlgorithmHistoryDataPoints => 150;
+
+        /// <summary>
+        /// Final status of the algorithm
+        /// </summary>
+        public AlgorithmStatus AlgorithmStatus => AlgorithmStatus.Completed;
 
         /// <summary>
         /// This is used by the regression test system to indicate what the expected statistics are from running the algorithm
         /// </summary>
         public Dictionary<string, string> ExpectedStatistics => new Dictionary<string, string>
         {
-            {"Total Trades", "27"},
-            {"Average Win", "0.21%"},
-            {"Average Loss", "-0.21%"},
-            {"Compounding Annual Return", "-7.917%"},
-            {"Drawdown", "0.800%"},
-            {"Expectancy", "-0.009"},
-            {"Net Profit", "-0.338%"},
-            {"Sharpe Ratio", "-1.383"},
-            {"Probabilistic Sharpe Ratio", "27.380%"},
-            {"Loss Rate", "50%"},
-            {"Win Rate", "50%"},
-            {"Profit-Loss Ratio", "0.98"},
-            {"Alpha", "-0.033"},
-            {"Beta", "0.274"},
-            {"Annual Standard Deviation", "0.042"},
-            {"Annual Variance", "0.002"},
-            {"Information Ratio", "0.46"},
-            {"Tracking Error", "0.078"},
-            {"Treynor Ratio", "-0.213"},
+            {"Total Orders", "57"},
+            {"Average Win", "0.18%"},
+            {"Average Loss", "-0.24%"},
+            {"Compounding Annual Return", "-47.380%"},
+            {"Drawdown", "2.500%"},
+            {"Expectancy", "-0.352"},
+            {"Start Equity", "50000"},
+            {"End Equity", "48726.48"},
+            {"Net Profit", "-2.547%"},
+            {"Sharpe Ratio", "-3.372"},
+            {"Sortino Ratio", "-3.889"},
+            {"Probabilistic Sharpe Ratio", "9.872%"},
+            {"Loss Rate", "63%"},
+            {"Win Rate", "37%"},
+            {"Profit-Loss Ratio", "0.75"},
+            {"Alpha", "-0.208"},
+            {"Beta", "0.815"},
+            {"Annual Standard Deviation", "0.086"},
+            {"Annual Variance", "0.007"},
+            {"Information Ratio", "-4.871"},
+            {"Tracking Error", "0.039"},
+            {"Treynor Ratio", "-0.357"},
             {"Total Fees", "$0.00"},
-            {"Estimated Strategy Capacity", "$80000000.00"},
+            {"Estimated Strategy Capacity", "$230000000.00"},
             {"Lowest Capacity Asset", "AIG R735QTJ8XC9X"},
-            {"Fitness Score", "0.068"},
-            {"Kelly Criterion Estimate", "0"},
-            {"Kelly Criterion Probability Value", "0"},
-            {"Sortino Ratio", "-1.314"},
-            {"Return Over Maximum Drawdown", "-9.513"},
-            {"Portfolio Turnover", "0.413"},
-            {"Total Insights Generated", "0"},
-            {"Total Insights Closed", "0"},
-            {"Total Insights Analysis Completed", "0"},
-            {"Long Insight Count", "0"},
-            {"Short Insight Count", "0"},
-            {"Long/Short Ratio", "100%"},
-            {"Estimated Monthly Alpha Value", "$0"},
-            {"Total Accumulated Estimated Alpha Value", "$0"},
-            {"Mean Population Estimated Insight Value", "$0"},
-            {"Mean Population Direction", "0%"},
-            {"Mean Population Magnitude", "0%"},
-            {"Rolling Averaged Population Direction", "0%"},
-            {"Rolling Averaged Population Magnitude", "0%"},
-            {"OrderListHash", "5d42c2ef288fa9b3f8bf5fa8adc47a6c"}
+            {"Portfolio Turnover", "77.40%"},
+            {"Drawdown Recovery", "0"},
+            {"OrderListHash", "4fb8ffbdfd2cce69ac28b0d0992d7198"}
         };
     }
 }

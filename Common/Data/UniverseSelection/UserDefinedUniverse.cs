@@ -1,4 +1,4 @@
-﻿/*
+/*
  * QUANTCONNECT.COM - Democratizing Finance, Empowering Individuals.
  * Lean Algorithmic Trading Engine v2.0. Copyright 2014 QuantConnect Corporation.
  *
@@ -14,12 +14,12 @@
 */
 
 using System;
-using System.Collections.Generic;
-using System.Collections.Specialized;
 using System.Linq;
+using QuantConnect.Util;
 using QuantConnect.Interfaces;
 using QuantConnect.Securities;
-using QuantConnect.Util;
+using System.Collections.Generic;
+using System.Collections.Specialized;
 
 namespace QuantConnect.Data.UniverseSelection
 {
@@ -38,8 +38,8 @@ namespace QuantConnect.Data.UniverseSelection
         // `UniverseSelection.RemoveSecurityFromUniverse()` will query us at `GetSubscriptionRequests()` to get the `SubscriptionDataConfig` and remove it from the DF
         // and we need to return the config even after the call to `Remove()`
         private readonly HashSet<SubscriptionDataConfig> _pendingRemovedConfigs = new HashSet<SubscriptionDataConfig>();
-        private readonly UniverseSettings _universeSettings;
         private readonly Func<DateTime, IEnumerable<Symbol>> _selector;
+        private readonly object _lock = new ();
 
         /// <summary>
         /// Event fired when a symbol is added or removed from this universe
@@ -55,14 +55,6 @@ namespace QuantConnect.Data.UniverseSelection
         }
 
         /// <summary>
-        /// Gets the settings used for subscriptons added for this universe
-        /// </summary>
-        public override UniverseSettings UniverseSettings
-        {
-            get { return _universeSettings; }
-        }
-
-        /// <summary>
         /// Initializes a new instance of the <see cref="UserDefinedUniverse"/> class
         /// </summary>
         /// <param name="configuration">The configuration used to resolve the data for universe selection</param>
@@ -74,9 +66,14 @@ namespace QuantConnect.Data.UniverseSelection
         {
             _interval = interval;
             _symbols = symbols.ToHashSet();
-            _universeSettings = universeSettings;
+            UniverseSettings = universeSettings;
             // the selector Func will be the union of the provided symbols and the added symbols or subscriptions data configurations
-            _selector = time => _subscriptionDataConfigs.Select(x => x.Symbol).Union(_symbols);
+            _selector = time => {
+                lock(_lock)
+                {
+                    return _subscriptionDataConfigs.Select(x => x.Symbol).Union(_symbols).ToHashSet();
+                }
+            };
         }
 
         /// <summary>
@@ -91,7 +88,7 @@ namespace QuantConnect.Data.UniverseSelection
             : base(configuration)
         {
             _interval = interval;
-            _universeSettings = universeSettings;
+            UniverseSettings = universeSettings;
             _selector = time =>
             {
                 var selectSymbolsResult = selector(time.ConvertFromUtc(Configuration.ExchangeTimeZone));
@@ -120,7 +117,14 @@ namespace QuantConnect.Data.UniverseSelection
         /// <returns>True if the symbol was added, false if it was already present</returns>
         public bool Add(Symbol symbol)
         {
-            if (_symbols.Add(symbol))
+            var added = false;
+            lock (_lock)
+            {
+                // let's not call the event having the lock if we don't need too
+                added = _symbols.Add(symbol);
+            }
+
+            if (added)
             {
                 OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Add, symbol));
                 return true;
@@ -135,7 +139,14 @@ namespace QuantConnect.Data.UniverseSelection
         /// <returns>True if the subscriptionDataConfig was added, false if it was already present</returns>
         public bool Add(SubscriptionDataConfig subscriptionDataConfig)
         {
-            if (_subscriptionDataConfigs.Add(subscriptionDataConfig))
+            var added = false;
+            lock (_lock)
+            {
+                // let's not call the event having the lock if we don't need too
+                added = _subscriptionDataConfigs.Add(subscriptionDataConfig);
+            }
+
+            if (added)
             {
                 OnCollectionChanged(new NotifyCollectionChangedEventArgs(NotifyCollectionChangedAction.Add, subscriptionDataConfig.Symbol));
                 return true;
@@ -216,19 +227,23 @@ namespace QuantConnect.Data.UniverseSelection
             DateTime maximumEndTimeUtc,
             ISubscriptionDataConfigService subscriptionService)
         {
-            var result = _subscriptionDataConfigs.Where(x => x.Symbol == security.Symbol).ToList();
-            if (!result.Any())
+            List<SubscriptionDataConfig> result;
+            lock (_lock)
             {
-                result = _pendingRemovedConfigs.Where(x => x.Symbol == security.Symbol).ToList();
-                if (result.Any())
+                result = _subscriptionDataConfigs.Where(x => x.Symbol == security.Symbol).ToList();
+                if (!result.Any())
                 {
-                    _pendingRemovedConfigs.RemoveWhere(x => x.Symbol == security.Symbol);
-                }
-                else
-                {
-                    result = base.GetSubscriptionRequests(security, currentTimeUtc, maximumEndTimeUtc, subscriptionService).Select(x => x.Configuration).ToList();
-                    // we create subscription data configs ourselves, add the configs
-                    _subscriptionDataConfigs.UnionWith(result);
+                    result = _pendingRemovedConfigs.Where(x => x.Symbol == security.Symbol).ToList();
+                    if (result.Any())
+                    {
+                        _pendingRemovedConfigs.RemoveWhere(x => x.Symbol == security.Symbol);
+                    }
+                    else
+                    {
+                        result = base.GetSubscriptionRequests(security, currentTimeUtc, maximumEndTimeUtc, subscriptionService).Select(x => x.Configuration).ToList();
+                        // we create subscription data configs ourselves, add the configs
+                        _subscriptionDataConfigs.UnionWith(result);
+                    }
                 }
             }
             return result.Select(config => new SubscriptionRequest(isUniverseSubscription: false,
@@ -258,17 +273,20 @@ namespace QuantConnect.Data.UniverseSelection
 
         private bool RemoveAndKeepTrack(Symbol symbol)
         {
-            var toBeRemoved = _subscriptionDataConfigs.Where(x => x.Symbol == symbol).ToList();
-            var removedSymbol = _symbols.Remove(symbol);
-
-            if (removedSymbol || toBeRemoved.Any())
+            lock (_lock)
             {
-                _subscriptionDataConfigs.RemoveWhere(x => x.Symbol == symbol);
-                _pendingRemovedConfigs.UnionWith(toBeRemoved);
-                return true;
-            }
+                var toBeRemoved = _subscriptionDataConfigs.Where(x => x.Symbol == symbol).ToList();
+                var removedSymbol = _symbols.Remove(symbol);
 
-            return false;
+                if (removedSymbol || toBeRemoved.Any())
+                {
+                    _subscriptionDataConfigs.RemoveWhere(x => x.Symbol == symbol);
+                    _pendingRemovedConfigs.UnionWith(toBeRemoved);
+                    return true;
+                }
+
+                return false;
+            }
         }
     }
 }

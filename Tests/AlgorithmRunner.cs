@@ -17,7 +17,6 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Linq.Expressions;
 using System.Threading.Tasks;
 using NodaTime;
 using NUnit.Framework;
@@ -26,15 +25,15 @@ using QuantConnect.Configuration;
 using QuantConnect.Data;
 using QuantConnect.Interfaces;
 using QuantConnect.Lean.Engine;
-using QuantConnect.Lean.Engine.Alphas;
+using QuantConnect.Lean.Engine.DataFeeds;
 using QuantConnect.Lean.Engine.HistoricalData;
 using QuantConnect.Lean.Engine.Results;
 using QuantConnect.Lean.Engine.Setup;
+using QuantConnect.Lean.Engine.Storage;
 using QuantConnect.Logging;
 using QuantConnect.Orders;
 using QuantConnect.Packets;
 using QuantConnect.Securities;
-using QuantConnect.Tests.Common.Securities;
 using QuantConnect.Util;
 using HistoryRequest = QuantConnect.Data.HistoryRequest;
 
@@ -48,45 +47,55 @@ namespace QuantConnect.Tests
         public static AlgorithmRunnerResults RunLocalBacktest(
             string algorithm,
             Dictionary<string, string> expectedStatistics,
-            AlphaRuntimeStatistics expectedAlphaStatistics,
             Language language,
             AlgorithmStatus expectedFinalStatus,
             DateTime? startDate = null,
             DateTime? endDate = null,
             string setupHandler = "RegressionSetupHandlerWrapper",
             decimal? initialCash = null,
-            string algorithmLocation = null)
+            string algorithmLocation = null,
+            bool returnLogs = false,
+            Dictionary<string, string> customConfigurations = null)
         {
             AlgorithmManager algorithmManager = null;
             var statistics = new Dictionary<string, string>();
-            var alphaStatistics = new AlphaRuntimeStatistics(new TestAccountCurrencyProvider());
             BacktestingResultHandler results = null;
 
             Composer.Instance.Reset();
             SymbolCache.Clear();
+            TextSubscriptionDataSourceReader.ClearCache();
             MarketOnCloseOrder.SubmissionTimeBuffer = MarketOnCloseOrder.DefaultSubmissionTimeBuffer;
+
+            // clean up object storage
+            var objectStorePath = LocalObjectStore.DefaultObjectStore;
+            if (Directory.Exists(objectStorePath))
+            {
+                Directory.Delete(objectStorePath, true);
+            }
 
             var ordersLogFile = string.Empty;
             var logFile = $"./regression/{algorithm}.{language.ToLower()}.log";
             Directory.CreateDirectory(Path.GetDirectoryName(logFile));
             File.Delete(logFile);
+            var logs = new List<string>();
 
             var reducedDiskSize = TestContext.Parameters.Exists("reduced-disk-size") &&
                 bool.Parse(TestContext.Parameters["reduced-disk-size"]);
 
             try
             {
-                // set the configuration up
                 Config.Set("algorithm-type-name", algorithm);
                 Config.Set("live-mode", "false");
                 Config.Set("environment", "");
-                Config.Set("messaging-handler", "QuantConnect.Messaging.Messaging");
+                Config.Set("messaging-handler", "QuantConnect.Tests.RegressionTestMessageHandler");
                 Config.Set("job-queue-handler", "QuantConnect.Queues.JobQueue");
                 Config.Set("setup-handler", setupHandler);
                 Config.Set("history-provider", "RegressionHistoryProviderWrapper");
                 Config.Set("api-handler", "QuantConnect.Api.Api");
                 Config.Set("result-handler", "QuantConnect.Lean.Engine.Results.RegressionResultHandler");
+                Config.Set("fundamental-data-provider", "QuantConnect.Tests.Common.Data.Fundamental.TestFundamentalDataProvider");
                 Config.Set("algorithm-language", language.ToString());
+                Config.Set("data-monitor", typeof(NullDataMonitor).Name);
                 if (string.IsNullOrEmpty(algorithmLocation))
                 {
                     Config.Set("algorithm-location",
@@ -98,33 +107,45 @@ namespace QuantConnect.Tests
                 {
                     Config.Set("algorithm-location", algorithmLocation);
                 }
+                // set the custom configuration
+                if (customConfigurations != null)
+                {
+                    foreach (var (key, value) in customConfigurations)
+                    {
+                        Config.Set(key, value);
+                    }
+                }
 
                 // Store initial log variables
                 var initialLogHandler = Log.LogHandler;
                 var initialDebugEnabled = Log.DebuggingEnabled;
 
-                ILogHandler[] newLogHandlers;
-                // Use our current test LogHandler and a FileLogHandler
-                if (reducedDiskSize)
+                var newLogHandlers = new List<ILogHandler>();
+                if (MaintainLogHandlerAttribute.LogHandler != null)
                 {
-                    newLogHandlers = new [] { MaintainLogHandlerAttribute.LogHandler };
+                    newLogHandlers.Add(MaintainLogHandlerAttribute.LogHandler);
                 }
-                else
+                // Use our current test LogHandler and a FileLogHandler
+                if (!reducedDiskSize)
                 {
-                    newLogHandlers = new [] { MaintainLogHandlerAttribute.LogHandler, new FileLogHandler(logFile, false) };
+                    newLogHandlers.Add(new FileLogHandler(logFile, false));
+                }
+                if (returnLogs)
+                {
+                    var storeLog = (string logMessage) => logs.Add(logMessage);
+                    newLogHandlers.Add(new FunctionalLogHandler(storeLog, storeLog, storeLog, storeLog));
                 }
 
-                using (Log.LogHandler = new CompositeLogHandler(newLogHandlers))
-                using (var algorithmHandlers = LeanEngineAlgorithmHandlers.FromConfiguration(Composer.Instance))
-                using (var systemHandlers = LeanEngineSystemHandlers.FromConfiguration(Composer.Instance))
-                using (var workerThread  = new TestWorkerThread())
+                using (Log.LogHandler = new CompositeLogHandler(newLogHandlers.ToArray()))
+                using (var algorithmHandlers = Initializer.GetAlgorithmHandlers())
+                using (var systemHandlers = Initializer.GetSystemHandlers())
+                using (var workerThread = new TestWorkerThread())
                 {
                     Log.DebuggingEnabled = !reducedDiskSize;
 
                     Log.Trace("");
                     Log.Trace("{0}: Running " + algorithm + "...", DateTime.UtcNow);
                     Log.Trace("");
-
 
                     // run the algorithm in its own thread
                     var engine = new Lean.Engine.Engine(systemHandlers, algorithmHandlers, false);
@@ -143,6 +164,12 @@ namespace QuantConnect.Tests
                             }
                             algorithmManager = new AlgorithmManager(false, job);
 
+                            var regressionTestMessageHandler = systemHandlers.Notify as RegressionTestMessageHandler;
+                            if (regressionTestMessageHandler != null)
+                            {
+                                regressionTestMessageHandler.SetAlgorithmManager(algorithmManager);
+                            }
+
                             systemHandlers.LeanManager.Initialize(systemHandlers, algorithmHandlers, job, algorithmManager);
 
                             engine.Run(job, algorithmManager, algorithmPath, workerThread);
@@ -154,12 +181,14 @@ namespace QuantConnect.Tests
                         }
                     }).Wait();
 
-                    var backtestingResultHandler = (BacktestingResultHandler)algorithmHandlers.Results;
-                    results = backtestingResultHandler;
-                    statistics = backtestingResultHandler.FinalStatistics;
+                    var regressionResultHandler = (RegressionResultHandler)algorithmHandlers.Results;
+                    results = regressionResultHandler;
+                    statistics = regressionResultHandler.FinalStatistics;
 
-                    var defaultAlphaHandler = (DefaultAlphaHandler) algorithmHandlers.Alphas;
-                    alphaStatistics = defaultAlphaHandler.RuntimeStatistics;
+                    if (expectedFinalStatus == AlgorithmStatus.Completed && regressionResultHandler.HasRuntimeError)
+                    {
+                        Assert.Fail($"There was a runtime error running the algorithm");
+                    }
                 }
 
                 // Reset settings to initial values
@@ -174,43 +203,7 @@ namespace QuantConnect.Tests
                 }
             }
 
-            if (algorithmManager?.State != expectedFinalStatus)
-            {
-                Assert.Fail($"Algorithm state should be {expectedFinalStatus} and is: {algorithmManager?.State}");
-            }
-
-            foreach (var expectedStat in expectedStatistics)
-            {
-                string result;
-                Assert.IsTrue(statistics.TryGetValue(expectedStat.Key, out result), "Missing key: " + expectedStat.Key);
-
-                // normalize -0 & 0, they are the same thing
-                var expected = expectedStat.Value;
-                if (expected == "-0")
-                {
-                    expected = "0";
-                }
-
-                if (result == "-0")
-                {
-                    result = "0";
-                }
-
-                Assert.AreEqual(expected, result, "Failed on " + expectedStat.Key);
-            }
-
-            if (expectedAlphaStatistics != null)
-            {
-                AssertAlphaStatistics(expectedAlphaStatistics, alphaStatistics, s => s.MeanPopulationScore.Direction);
-                AssertAlphaStatistics(expectedAlphaStatistics, alphaStatistics, s => s.MeanPopulationScore.Magnitude);
-                AssertAlphaStatistics(expectedAlphaStatistics, alphaStatistics, s => s.RollingAveragedPopulationScore.Direction);
-                AssertAlphaStatistics(expectedAlphaStatistics, alphaStatistics, s => s.RollingAveragedPopulationScore.Magnitude);
-                AssertAlphaStatistics(expectedAlphaStatistics, alphaStatistics, s => s.LongShortRatio);
-                AssertAlphaStatistics(expectedAlphaStatistics, alphaStatistics, s => s.TotalInsightsClosed);
-                AssertAlphaStatistics(expectedAlphaStatistics, alphaStatistics, s => s.TotalInsightsGenerated);
-                AssertAlphaStatistics(expectedAlphaStatistics, alphaStatistics, s => s.TotalAccumulatedEstimatedAlphaValue);
-                AssertAlphaStatistics(expectedAlphaStatistics, alphaStatistics, s => s.TotalInsightsAnalysisCompleted);
-            }
+            AssertAlgorithmState(expectedFinalStatus, algorithmManager?.State, expectedStatistics, statistics);
 
             if (!reducedDiskSize)
             {
@@ -227,26 +220,7 @@ namespace QuantConnect.Tests
                 if (File.Exists(ordersLogFile)) File.Copy(ordersLogFile, passedOrderLogFile);
 
             }
-            return new AlgorithmRunnerResults(algorithm, language, algorithmManager, results);
-        }
-
-        private static void AssertAlphaStatistics(AlphaRuntimeStatistics expected, AlphaRuntimeStatistics actual, Expression<Func<AlphaRuntimeStatistics, object>> selector)
-        {
-            // extract field name from expression
-            var field = selector.AsEnumerable().OfType<MemberExpression>().First().ToString();
-            field = field.Substring(field.IndexOf('.') + 1);
-
-            var func = selector.Compile();
-            var expectedValue = func(expected);
-            var actualValue = func(actual);
-            if (expectedValue is double)
-            {
-                Assert.AreEqual((double)expectedValue, (double)actualValue, 1e-4, "Failed on alpha statistics " + field);
-            }
-            else
-            {
-                Assert.AreEqual(expectedValue, actualValue, "Failed on alpha statistics " + field);
-            }
+            return new AlgorithmRunnerResults(algorithm, language, algorithmManager, results, logs);
         }
 
         /// <summary>
@@ -275,10 +249,11 @@ namespace QuantConnect.Tests
             public override IEnumerable<Slice> GetHistory(IEnumerable<HistoryRequest> requests, DateTimeZone sliceTimeZone)
             {
                 requests = requests.ToList();
-                if (requests.Any(r => RegressionSetupHandlerWrapper.Algorithm.UniverseManager.ContainsKey(r.Symbol)
-                    && (r.Symbol.SecurityType != SecurityType.Future || !r.Symbol.IsCanonical())))
+                if (requests.Any(r => r.Symbol.SecurityType != SecurityType.Option && r.Symbol.SecurityType != SecurityType.IndexOption
+                        && r.Symbol.SecurityType != SecurityType.FutureOption
+                        && r.Symbol.SecurityType != SecurityType.Future && r.Symbol.IsCanonical()))
                 {
-                    throw new Exception("History requests should not be submitted for universe symbols");
+                    throw new RegressionTestException($"Invalid history request symbols: {string.Join(",", requests.Select(x => x.Symbol))}");
                 }
                 return base.GetHistory(requests, sliceTimeZone);
             }
@@ -286,6 +261,50 @@ namespace QuantConnect.Tests
 
         public class TestWorkerThread : WorkerThread
         {
+        }
+        public class NullDataMonitor : IDataMonitor
+        {
+            public DataMonitorReport Report => null;
+            public void Dispose()
+            { }
+            public void Exit()
+            { }
+            public void OnNewDataRequest(object sender, DataProviderNewDataRequestEventArgs e)
+            { }
+        }
+        public static void AssertAlgorithmState(AlgorithmStatus expectedFinalStatus, AlgorithmStatus? actualState,
+            IDictionary<string, string> expectedStatistics, IDictionary<string, string> statistics)
+        {
+            if (actualState != expectedFinalStatus)
+            {
+                Assert.Fail($"Algorithm state should be {expectedFinalStatus} and is: {actualState}");
+            }
+
+            foreach (var expectedStat in expectedStatistics)
+            {
+                if (statistics == null)
+                {
+                    Assert.Fail("Algorithm statistics are null");
+                    break;
+                }
+
+                string result;
+                Assert.IsTrue(statistics.TryGetValue(expectedStat.Key, out result), "Missing key: " + expectedStat.Key);
+
+                // normalize -0 & 0, they are the same thing
+                var expected = expectedStat.Value;
+                if (expected == "-0")
+                {
+                    expected = "0";
+                }
+
+                if (result == "-0")
+                {
+                    result = "0";
+                }
+
+                Assert.AreEqual(expected, result, "Failed on " + expectedStat.Key);
+            }
         }
     }
 }
